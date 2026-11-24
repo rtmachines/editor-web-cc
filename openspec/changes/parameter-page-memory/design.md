@@ -162,6 +162,7 @@ On 2026-11-22 the owner chose D2, one mode row for each type level.
   - A notice names the type level. The next save stores the copied limits.
   - A line of a sent limit row names its input by the leaf path and the field, not by the sent row number. The copied rows thus get new numbers safely.
   - When the grid has no input of that field for the leaf path, the line keeps the id of the sent row number. It then stands only in the summary, as today.
+  - The copy can give the sent row number to an input of another leaf. Then the line has no id. It stands only in the summary, with no link and no line under an input (ADR-0223 (g)).
   - The copied limits add limit rows. A save can then pass `budget.limit_rows_per_version` (32 768). The command then refuses it with `E-RCP-021` and writes nothing.
 - The read-only grid of `parameter.html` and `grid-values.html` shows the mode text of each type level. It shows the copied limits as text. It has no button and no notice, because a reader cannot save.
 - The fixture then has 32 mode rows and 16 384 leaf rows. Its HTML shrinks from about 176.7 MB to about 22.6 MB in `en`. This is an estimate: 176 653 007 − 154 094 895 + 11 751 = 22 569 863 bytes.

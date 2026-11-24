@@ -29,7 +29,7 @@ enum Step<'t> {
         range: String,
     },
     /// The mode row of the array level `level`. The row stands for its type level (ADR-0223).
-    Mode { level: String, each: bool },
+    Mode { level: String },
     /// The toggle row and the start of a group of the level `level` with `count` elements.
     Open {
         level: String,
@@ -132,8 +132,8 @@ impl<'a> Walk<'a> {
                 limit,
                 range,
             } => self.node(node, value, limit, range),
-            Step::Mode { level, each } => {
-                self.mode_row(&level, each);
+            Step::Mode { level } => {
+                self.mode_row(&level);
                 Vec::new()
             }
             Step::Open {
@@ -221,7 +221,6 @@ impl<'a> Walk<'a> {
         if owns_level {
             steps.push(Step::Mode {
                 level: level.clone(),
-                each,
             });
         }
         if value.is_none() && !each {
@@ -320,12 +319,14 @@ impl<'a> Walk<'a> {
     /// Write the mode row of the type level of the array level `level` (ADR-0039 (k), ADR-0223).
     ///
     /// The first array level of a type level writes the row. The array levels that follow write
-    /// none. The row takes the mode of the first array level.
-    fn mode_row(&mut self, level: &str, each: bool) {
+    /// none. The row shows the mode of the type level. The type level has a limit per element when
+    /// an index row sits at any of its array levels. The pressed switch overrides this mode.
+    fn mode_row(&mut self, level: &str) {
         let level = type_level(level);
         if !self.mode_levels.insert(level.clone()) {
             return;
         }
+        let each = self.limits.is_each_of_type_level(&level);
         let (button, current) = if each {
             ("grid-mode-join", "grid-mode-current-each")
         } else {

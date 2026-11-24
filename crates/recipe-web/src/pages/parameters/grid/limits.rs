@@ -61,6 +61,15 @@ pub(crate) struct LimitTexts {
 }
 
 impl LimitTexts {
+    /// Return true when the row holds a minimum, a maximum, or a maximum length.
+    ///
+    /// A blank row only keeps the place of a limit in the form. It is no limit.
+    fn has_bound(&self) -> bool {
+        [&self.min, &self.max, &self.max_length]
+            .iter()
+            .any(|text| !text.trim().is_empty())
+    }
+
     /// Write the texts of stored limits. A time bound shows as its canonical IEC literal.
     pub(crate) fn from_stored(tree: &TypeTree, limits: &[StoredLimit]) -> Vec<Self> {
         limits
@@ -119,6 +128,18 @@ impl LimitTexts {
     }
 }
 
+/// Return a row of the leaf path `path` without a bound, or `None` when the tree has no such leaf.
+fn blank_row_at(tree: &TypeTree, path: &str) -> Option<LimitTexts> {
+    let path = LeafPath::parse(path).ok()?;
+    path.resolve(tree)?;
+    Some(LimitTexts {
+        path,
+        min: String::new(),
+        max: String::new(),
+        max_length: String::new(),
+    })
+}
+
 /// The limit rows of a grid by the text of their path, and the mode of the pressed type level.
 ///
 /// The type solves one problem: an array level shows "a limit per element" when a row holds an
@@ -135,6 +156,8 @@ pub(super) struct LimitSet {
     rows: BTreeMap<String, LimitTexts>,
     /// The text before each index segment of a row path, such as `[*].x` of `[*].x[2].v`.
     index_levels: BTreeSet<String>,
+    /// The type levels that hold an index row at one of their array levels (ADR-0223 (c)).
+    each_levels: BTreeSet<String>,
     /// The pressed type level and the mode of all its array levels after the switch.
     pressed: Option<(String, bool)>,
     /// The count of the array levels of the pressed type level with unequal limits.
@@ -158,8 +181,10 @@ impl LimitSet {
             .filter(|row| row.path.resolve(tree).is_some())
             .map(|row| (row.path.to_string(), row))
             .collect();
+        let index_levels = index_levels(rows.keys());
         let mut set = Self {
-            index_levels: index_levels(rows.keys()),
+            each_levels: each_type_levels(&index_levels),
+            index_levels,
             rows,
             pressed: None,
             unequal: 0,
@@ -189,7 +214,7 @@ impl LimitSet {
         for level in &levels {
             self.copy_to_elements(tree, level);
         }
-        self.index_levels = index_levels(self.rows.keys());
+        self.refresh_levels();
         let pressed = pressed.map(ToString::to_string);
         self.mixed = levels
             .into_iter()
@@ -197,23 +222,30 @@ impl LimitSet {
             .collect();
     }
 
-    /// Return the type levels with a `[*]` limit at one array level and an index limit at another.
+    /// Return the type levels with a real `[*]` limit at one array level and an index limit at
+    /// another.
     ///
     /// The domain permits such limits, because `[*]` and an index must not name one array level
     /// (`domain-model.md` section 2.1).
     fn mixed_type_levels(&self) -> BTreeSet<String> {
-        let each: BTreeSet<String> = self
-            .index_levels
-            .iter()
-            .map(|prefix| type_level(&format!("{prefix}{ALL}")))
-            .collect();
-        if each.is_empty() {
-            return each;
+        if self.each_levels.is_empty() {
+            return BTreeSet::new();
         }
+        // `collect` buffers every item before it removes the duplicates. `extend` inserts
+        // one item at a time, so only the distinct type levels stay in memory.
+        let mut each = BTreeSet::new();
+        each.extend(
+            self.rows
+                .iter()
+                .filter(|(_path, row)| row.has_bound())
+                .flat_map(|(path, _row)| index_prefixes(path))
+                .map(each_type_level),
+        );
         let all: BTreeSet<String> = self
             .rows
-            .keys()
-            .flat_map(|path| all_type_levels(path))
+            .iter()
+            .filter(|(_path, row)| row.has_bound())
+            .flat_map(|(path, _row)| all_type_levels(path))
             .collect();
         all.intersection(&each).cloned().collect()
     }
@@ -228,7 +260,7 @@ impl LimitSet {
             return;
         };
         let indexes = index_texts(dimensions);
-        self.split(tree, &shape, &indexes);
+        self.split(tree, &shape, &indexes, true);
     }
 
     /// Return true when the set copied the `[*]` limits of the type level `level`.
@@ -248,6 +280,28 @@ impl LimitSet {
             Some((pressed, each)) if *pressed == type_level(level) => *each,
             _other => self.has_index_at(level),
         }
+    }
+
+    /// Return true when the type level of `level` shows a limit per element.
+    ///
+    /// The type level shows it when an index row sits at any of its array levels, not only at the
+    /// first one (ADR-0223 (c)). The pressed type level shows the mode of its switch.
+    pub(super) fn is_each_type_level(&self, level: &str) -> bool {
+        self.is_each_of_type_level(&type_level(level))
+    }
+
+    /// Return true when the type level `type_level`, already computed, shows a limit per element.
+    pub(super) fn is_each_of_type_level(&self, type_level: &str) -> bool {
+        match &self.pressed {
+            Some((pressed, each)) if pressed == type_level => *each,
+            _other => self.each_levels.contains(type_level),
+        }
+    }
+
+    /// Recompute the index levels and the per-element type levels after the rows changed.
+    fn refresh_levels(&mut self) {
+        self.index_levels = index_levels(self.rows.keys());
+        self.each_levels = each_type_levels(&self.index_levels);
     }
 
     /// Return the count of the array levels of the type level `level` with unequal limits.
@@ -293,9 +347,10 @@ impl LimitSet {
 
     /// Switch the mode of the type level `level` and move the rows of each of its array levels.
     ///
-    /// The mode of the first array level of the type level tells the direction, because the mode
-    /// row shows that mode. A level with an index segment is no type level, and the switch skips
-    /// it. The reader refuses such a `limit_mode` (ADR-0223 (b)).
+    /// The mode of the type level tells the direction, because the mode row shows that mode. The
+    /// type level has a limit per element when an index row sits at any of its array levels. The
+    /// pressed switch overrides this mode. A level with an index segment is no type level, and the
+    /// switch skips it. The reader refuses such a `limit_mode` (ADR-0223 (b)).
     fn switch(&mut self, tree: &TypeTree, level: &LeafPath) {
         let level_text = level.to_string();
         if level
@@ -310,14 +365,14 @@ impl LimitSet {
             return;
         };
         let indexes = index_texts(dimensions);
-        let each = !self.has_index_at(&first);
+        let each = !self.is_each_type_level(&first);
         if each {
-            self.split(tree, &shape, &indexes);
+            self.split(tree, &shape, &indexes, false);
         } else {
             self.join(tree, &shape, indexes.len());
         }
         self.count_visits(self.rows.len());
-        self.index_levels = index_levels(self.rows.keys());
+        self.refresh_levels();
         self.pressed = Some((level_text, each));
     }
 
@@ -373,13 +428,14 @@ impl LimitSet {
     ///
     /// The set then holds at most one row per leaf of the tree. The copies above that count drop.
     /// One pass over the rows finds the rows of every array level of the type level.
-    fn split(&mut self, tree: &TypeTree, shape: &[&str], indexes: &[String]) {
+    /// The copy of mixed modes sets `keep_blank`: a blank row is no limit and stays one row.
+    fn split(&mut self, tree: &TypeTree, shape: &[&str], indexes: &[String], keep_blank: bool) {
         let mut moved: Vec<(String, String, LimitTexts)> = Vec::new();
         let mut visits = 0_usize;
         self.rows.retain(|path, row| {
             visits = visits.saturating_add(1);
             match split_at_level(path, shape) {
-                Some(cut) if cut.element == ALL => {
+                Some(cut) if cut.element == ALL && !(keep_blank && !row.has_bound()) => {
                     moved.push((cut.prefix.to_owned(), cut.tail.to_owned(), row.clone()));
                     false
                 }
@@ -395,11 +451,12 @@ impl LimitSet {
                     .iter()
                     .map(move |index| (row, format!("{prefix}{index}{tail}")))
             })
+            .filter(|(_row, path)| !self.rows.contains_key(path))
             .take(room)
             .filter_map(|(row, path)| row.moved_to(tree, &path))
             .collect();
         for copy in copies {
-            self.rows.insert(copy.path.to_string(), copy);
+            self.rows.entry(copy.path.to_string()).or_insert(copy);
         }
     }
 
@@ -428,7 +485,10 @@ impl LimitSet {
                 }
                 Entry::Occupied(mut slot) => {
                     let group = slot.get_mut();
-                    group.count = group.count.saturating_add(1);
+                    match group.count.checked_add(1) {
+                        Some(count) => group.count = count,
+                        None => group.equal = false,
+                    }
                     group.equal = group.equal && group.first.has_bounds_of(row);
                 }
             }
@@ -443,6 +503,11 @@ impl LimitSet {
                     self.rows.insert(joined.path.to_string(), joined);
                 }
             } else {
+                // An empty `[*]` row keeps the outer index of the group (ADR-0223 (d)).
+                let path = format!("{prefix}{ALL}{tail}");
+                if let Some(empty) = blank_row_at(tree, &path) {
+                    self.rows.insert(empty.path.to_string(), empty);
+                }
                 unequal_levels.insert(prefix);
             }
         }
@@ -552,14 +617,32 @@ fn split_at_level<'p>(path: &'p str, shape: &[&str]) -> Option<LevelCut<'p>> {
 /// A level `<prefix>[*]` has a limit per element when the set holds its `<prefix>`.
 fn index_levels<'p>(paths: impl Iterator<Item = &'p String>) -> BTreeSet<String> {
     paths
-        .flat_map(|path| {
-            path.match_indices('[').filter_map(|(start, _bracket)| {
-                let rest = path.get(start..)?;
-                element_tail(rest)?;
-                path.get(..start)
-            })
-        })
+        .flat_map(|path| index_prefixes(path))
         .map(str::to_owned)
+        .collect()
+}
+
+/// Return the borrowed text before each index segment of one path.
+///
+/// This avoids one owned string per prefix when the caller maps each prefix at once.
+fn index_prefixes(path: &str) -> impl Iterator<Item = &str> {
+    path.match_indices('[').filter_map(|(start, _bracket)| {
+        let rest = path.get(start..)?;
+        element_tail(rest)?;
+        path.get(..start)
+    })
+}
+
+/// Return the type level of the array level `<prefix>[*]`.
+fn each_type_level(prefix: &str) -> String {
+    type_level(&format!("{prefix}{ALL}"))
+}
+
+/// Return the type level of each array level that follows one of the index level prefixes.
+fn each_type_levels(index_levels: &BTreeSet<String>) -> BTreeSet<String> {
+    index_levels
+        .iter()
+        .map(|prefix| each_type_level(prefix))
         .collect()
 }
 

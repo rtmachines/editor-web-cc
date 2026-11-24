@@ -212,6 +212,39 @@ fn grid_mixed_modes_copy_the_all_limit_to_the_element_rows() {
 }
 
 #[test]
+fn grid_mixed_modes_do_not_expand_a_blank_all_row() {
+    let rows = vec![
+        bounded("[1][*]", "0", "10"),
+        bounded("[2][*]", "", ""),
+        bounded("[3][1]", "0", "20"),
+    ];
+    let mut kit = Kit::new();
+    let int = kit.primitive(Primitive::Int);
+    let inner = kit.array(int, &[(1, 2)]);
+    let root = kit.array(inner, &[(1, 3)]);
+    let view = grid(&kit.tree(root), rows);
+    let inputs = input_rows(&view);
+    assert!(inputs.contains(&input("[1][1]", "0", "10")));
+    assert!(inputs.contains(&input("[1][2]", "0", "10")));
+    assert!(inputs.contains(&input("[3][1]", "0", "20")));
+    assert!(inputs.contains(&input("[2][*]", "", "")));
+    assert!(
+        inputs
+            .iter()
+            .all(|(path, _min, _max)| !path.starts_with("[2][1") && !path.starts_with("[2][2"))
+    );
+}
+
+#[test]
+fn grid_the_switch_to_a_limit_per_element_expands_a_blank_all_row() {
+    let rows = vec![bounded("[1][*]", "0", "10"), bounded("[2][*]", "", "")];
+    let view = switched(&nest_tree(), rows, "[*][*]");
+    let inputs = input_rows(&view);
+    assert!(inputs.contains(&input("[2][1]", "", "")));
+    assert!(inputs.contains(&input("[2][3]", "", "")));
+}
+
+#[test]
 fn grid_mixed_modes_show_one_notice_that_names_the_type_level() {
     let view = grid(&nest_tree(), mixed_rows());
     assert_eq!(notice_of(&view, "[*][*]"), MIXED_NOTICE);
@@ -253,6 +286,42 @@ fn grid_without_mixed_modes_shows_no_mixed_notice() {
         assert_eq!(notice_of(&view, "[*][*]"), "");
         assert_eq!(notice_of(&view, "[*]"), "");
     }
+}
+
+#[test]
+fn grid_a_blank_all_row_next_to_index_limits_shows_no_mixed_notice() {
+    let rows = vec![
+        bounded("[1][1]", "0", "10"),
+        bounded("[1][2]", "0", "10"),
+        bounded("[1][3]", "0", "10"),
+        bounded("[2][*]", "", ""),
+    ];
+    let view = grid(&nest_tree(), rows);
+    assert_eq!(notice_of(&view, "[*][*]"), "");
+    assert_eq!(
+        input_rows(&view),
+        [
+            input("[1][1]", "0", "10"),
+            input("[1][2]", "0", "10"),
+            input("[1][3]", "0", "10"),
+            input("[2][*]", "", ""),
+        ]
+    );
+}
+
+#[test]
+fn grid_blank_index_rows_next_to_an_all_limit_show_no_mixed_notice() {
+    let rows = vec![
+        bounded("[1][1]", "", ""),
+        bounded("[1][2]", "", ""),
+        bounded("[1][3]", "", ""),
+        bounded("[2][*]", "0", "10"),
+    ];
+    let view = grid(&nest_tree(), rows);
+    assert_eq!(notice_of(&view, "[*][*]"), "");
+    let rows = input_rows(&view);
+    assert!(rows.contains(&input("[2][*]", "0", "10")));
+    assert!(!rows.iter().any(|row| *row == input("[2][1]", "0", "10")));
 }
 
 #[test]
@@ -317,11 +386,14 @@ fn grid_the_switch_back_counts_each_array_level_with_unequal_limits() {
         bounded("[2][3]", "0", "7"),
     ];
     let view = switched(&nest_tree(), rows, "[*][*]");
-    assert_eq!(input_rows(&view), [input("[*][*]", "", "")]);
+    assert_eq!(
+        input_rows(&view),
+        [input("[1][*]", "", ""), input("[2][*]", "", "")]
+    );
     assert!(notice_of(&view, "[*][*]").contains("different limits: 2."));
     let currents = mode_currents(&view);
     assert!(
-        currents.contains(&"[*]: one limit for all elements".to_owned()),
+        currents.contains(&"[*]: a limit per element".to_owned()),
         "{currents:?}"
     );
 }
@@ -377,5 +449,55 @@ fn grid_the_switch_of_a_type_level_below_one_limit_for_all_copies_to_the_all_row
             input("[*][2]", "1", "9"),
             input("[*][3]", "1", "9"),
         ]
+    );
+}
+
+/// Return the sentence of the mode row of the type level `level`.
+fn current_of(view: &GridView, level: &str) -> String {
+    view.bodies
+        .iter()
+        .flat_map(|body| body.rows.iter())
+        .filter_map(GridRow::mode)
+        .find(|mode| mode.level == level)
+        .map(|mode| mode.current.clone())
+        .unwrap()
+}
+
+#[test]
+fn grid_an_index_limit_in_the_second_branch_gives_its_type_level_a_limit_per_element() {
+    let rows = ["[2][1]", "[2][2]", "[2][3]"].map(limit).to_vec();
+    let view = grid(&nest_tree(), rows);
+    assert_eq!(current_of(&view, "[*]"), "[*]: a limit per element");
+    assert_eq!(current_of(&view, "[*][*]"), "[*][*]: a limit per element");
+}
+
+#[test]
+fn grid_the_switch_of_a_type_level_with_an_index_limit_in_the_second_branch_joins() {
+    let rows = ["[2][1]", "[2][2]", "[2][3]"].map(limit).to_vec();
+    let view = switched(&nest_tree(), rows, "[*][*]");
+    assert_eq!(
+        current_of(&view, "[*][*]"),
+        "[*][*]: one limit for all elements"
+    );
+    let inputs = input_rows(&view);
+    assert!(inputs.contains(&input("[2][*]", "0", "100")));
+    assert!(
+        inputs
+            .iter()
+            .all(|(path, _min, _max)| !path.starts_with("[2][1"))
+    );
+}
+
+#[test]
+fn grid_mixed_modes_keep_a_sent_index_limit_of_the_same_array_level() {
+    let mut kit = Kit::new();
+    let int = kit.primitive(Primitive::Int);
+    let root = kit.array(int, &[(1, 2)]);
+    let tree = kit.tree(root);
+    let rows = vec![bounded("[*]", "0", "10"), bounded("[1]", "0", "5")];
+    let view = grid(&tree, rows);
+    assert_eq!(
+        input_rows(&view),
+        [input("[1]", "0", "5"), input("[2]", "0", "10")]
     );
 }

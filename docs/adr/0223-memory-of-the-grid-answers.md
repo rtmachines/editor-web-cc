@@ -105,6 +105,7 @@ Mixed modes in one type level:
   - A notice names the type level. The next save stores the copied limits.
 - (g) A line of a sent limit row names its input by the leaf path and the field, not by the sent row number. The copied rows thus get new row numbers safely.
   - When the grid has no input of that field for the leaf path, the line keeps the id of the sent row number. The line then stands only in the summary, as today.
+  - The copy can give the sent row number to an input of another leaf. Then the line has no id. It stands only in the summary, with no link and no line under an input.
 - (h) The copied limits add limit rows. A save can then exceed `budget.limit_rows_per_version` (32 768). The command then refuses the save with `E-RCP-021` and writes nothing.
 - (i) The read-only grid of `parameter.html` and `grid-values.html` shows the mode text of each type level. It shows the copied limits as text.
   - The read-only grid has no button and no notice, because a reader cannot save.

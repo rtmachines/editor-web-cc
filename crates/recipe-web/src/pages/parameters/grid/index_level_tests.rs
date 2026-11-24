@@ -165,7 +165,8 @@ fn grid_index_levels_a_switch_of_an_inner_type_level_gives_the_mode_of_each_arra
         assert_eq!(set.is_each(level), each, "level: {level}");
     }
     assert!(set.get("[2].x[*].w[*].v[*]").is_some());
-    assert!(set.get("[1].x[*].w[*].v[*]").is_none());
+    let blank = set.get("[1].x[*].w[*].v[*]").unwrap();
+    assert!(blank.min.is_empty() && blank.max.is_empty());
     assert_eq!(set.unequal_count("[*].x[*]"), 1);
     assert_eq!(set.unequal_count("[*]"), 0);
 }
@@ -196,7 +197,8 @@ fn grid_index_levels_a_switch_back_of_a_type_level_makes_at_most_two_visits_for_
     let set = LimitSet::new(&wide_tree(), rows, Some(&toggle));
     assert_eq!(set.get("[7][*]").map(|row| row.max.as_str()), Some("7"));
     assert!(set.get("[7][3]").is_none());
-    assert!(set.get("[5][*]").is_none());
+    let blank = set.get("[5][*]").unwrap();
+    assert!(blank.min.is_empty() && blank.max.is_empty());
     assert_eq!(set.unequal_count("[*][*]"), 1);
     assert!(!set.is_each("[7][*]"));
     assert!(set.visits() <= VISIT_BOUND, "{} visits", set.visits());

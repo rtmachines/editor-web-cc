@@ -117,6 +117,7 @@ Marks: `[opus]` is an ADR text (Opus). `[sonnet]` is a Sonnet task. `[mechanical
 - [x] 3.5 (recipe-web) [sonnet] A line of a sent limit row names its input by the leaf path and the field (`fields.rs:605`).
   - The line does not use the sent row number.
   - When the grid has no input of that field for the leaf path, the line keeps the id of the sent row number. It then stands only in the summary.
+  - When the copy gives the sent row number to an input of another leaf, the line has no id. It stands only in the summary, with no link (ADR-0223 (g)).
   - Red test: a `STRING` form with `[1][*]` and a bad `max_length` on `[2][1]`. The summary link and the line under the input name the input of `[2][1]`.
   - Today the line names the sent row number 1, which is the input of a copied row `[1][2]` after task 3.4.
   - Guard: a line of `max_length` on an `LDT` row keeps its sent id and stands only in the summary.
@@ -164,7 +165,7 @@ Marks: `[opus]` is an ADR text (Opus). `[sonnet]` is a Sonnet task. `[mechanical
   - Red test: for an HTMX success of `/definition`, only the clean form of `saved` builds a grid, so the count is 1. Today it is 2.
   - Red test: the count is 0 for a `409` conflict. Today it is 1.
   - Guard: the count is 1 for a refused field. A save that the command refuses still gets the lines of `input_of` under its inputs.
-  - Check: `cargo test -p recipe-web --all-features --locked prepare` and `cargo test -p recipe-web --all-features --locked grid_builds`.
+  - Check: `cargo test -p recipe-web --all-features --locked grid_builds`. The filter selects the eight tests of `grid_builds_tests.rs`.
 - [x] 4.6 (recipe-web) [sonnet] `saved` (`edit.rs:123`) writes three parts into one buffer of their exact length. The parts are the summary, the clean form, and the base block of the translations.
   - Guard: the HTMX success answer of `/definition` in the existing tests keeps its bytes, with the request id replaced.
   - First move the assembly of the body unchanged into a function `saved_body` that returns the `Html<String>`. `success` then consumes that body.
@@ -240,7 +241,7 @@ Each task of this group adds ignored tests to `route_tests.rs`. They use `nested
   - Set the status of ADR-0223 to "Accepted".
   - Red test: none, because the task writes no code.
   - Check: `python -I tools/ste-lint/ste-lint.py openspec/changes/parameter-page-memory/design.md docs/adr/0223-memory-of-the-grid-answers.md` gives 0 hard violations.
-- [ ] 5.12 (.github/workflows) [deploy] Add the job `heap` to `.github/workflows/ci.yml`. It sets `RUSTFLAGS="--cfg heap_measure"` and `CARGO_TARGET_DIR=target/heap`. It is a matrix of five shards with `fail-fast: false`. Each shard runs `cargo test -p recipe-web --all-features --locked -- --ignored --test-threads=1` with its own filters.
+- [x] 5.12 (.github/workflows) [deploy] Add the job `heap` to `.github/workflows/ci.yml`. It sets `RUSTFLAGS="--cfg heap_measure"` and `CARGO_TARGET_DIR=target/heap`. It is a matrix of five shards with `fail-fast: false`. Each shard runs `cargo test -p recipe-web --all-features --locked -- --ignored --test-threads=1` with its own filters.
   - Only the shard `rest` also runs `cargo clippy -p recipe-web --all-targets --all-features --locked -- -D warnings` with the same `RUSTFLAGS`, because the allocator line compiles only there.
   - The shards are `page` (`largest_page largest_read largest_mode_rows`), `refused` (`largest_refused`), `switch` (`largest_switch`), `again` (`largest_again`), and `rest`.
   - The shard `rest` passes `--skip` for each filter of the other four shards, so it runs every other ignored test.
@@ -256,7 +257,7 @@ Each task of this group adds ignored tests to `route_tests.rs`. They use `nested
 
 ## 6. Checks of the whole change
 
-- [ ] 6.1 (workspace, e2e) [mechanical] Run the local checks of `CONTRIBUTING.md`.
+- [x] 6.1 (workspace, e2e) [mechanical] Run the local checks of `CONTRIBUTING.md`.
   - Red test: none, because the task writes no code.
   - Check: `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --all-features --locked`, `cargo fmt --all --check`, and `cargo deny check`.
   - Check: the `ste-lint.py` command of `CLAUDE.md` and `openspec validate parameter-page-memory --strict`.

@@ -255,3 +255,31 @@ async fn limit_line_of_a_maximum_length_on_a_row_without_that_input_keeps_its_se
         reply.body
     );
 }
+
+#[tokio::test]
+async fn limit_line_of_a_length_on_a_row_that_the_copy_removed_stays_off_the_input_of_another_leaf()
+{
+    let world = world();
+    let type_text = "ARRAY[1..3] OF ARRAY[1..2] OF STRING(10)";
+    let rows = [("[1][*]", "5"), ("[2][*]", "x"), ("[3][1]", "5")];
+    let reply = add_string_reply(&world, type_text, &["[3][1]"], &rows).await;
+    assert_eq!(
+        reply.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        reply.body
+    );
+    // The copy of the mixed level renumbers the rows, so `limits-1-max_length` is the input of
+    // `[1][2]`. The line stays in the summary and has no link and no line under that input.
+    let body = &reply.body;
+    assert!(
+        body.contains("name=\"limits[1].leaf_path\" value=\"[1][2]\""),
+        "{body}"
+    );
+    assert!(body.contains("id=\"limits-1-max_length\""), "{body}");
+    assert!(!body.contains("id=\"limits-1-max_length-error\""), "{body}");
+    assert!(!body.contains("href=\"#limits-1-max_length\""), "{body}");
+    assert!(body.contains("[2][*]"), "{body}");
+    assert!(body.contains("<ul class=\"field-lines\"><li>"), "{body}");
+    assert!(!body.contains("aria-invalid"), "{body}");
+}

@@ -300,7 +300,6 @@ mod tests {
     #[test]
     #[cfg(not(heap_measure))]
     #[should_panic(expected = "cfg heap_measure")]
-    #[ignore = "measurement test: run alone with --ignored --test-threads=1"]
     fn peak_in_refuses_to_run_without_the_flag() {
         let _ = peak_in(|| allocate(MIB));
     }
@@ -476,7 +475,6 @@ mod tests {
     #[tokio::test]
     #[cfg(not(heap_measure))]
     #[should_panic(expected = "cfg heap_measure")]
-    #[ignore = "measurement test: run alone with --ignored --test-threads=1"]
     async fn peak_of_refuses_to_run_without_the_flag() {
         let _ = peak_of(&sink_router(), || {
             request(Method::POST, "/sink").body(Body::empty()).unwrap()

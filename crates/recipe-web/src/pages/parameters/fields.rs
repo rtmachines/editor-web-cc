@@ -562,13 +562,14 @@ impl SentFields {
     pub(crate) fn limit_list(&self, grid: Option<&GridView>) -> Result<LimitList, Vec<FieldError>> {
         let mut lines = Vec::new();
         let mut rows = Vec::new();
+        let mut shown = None;
         for row in &self.limits {
             let length = match present(&row.max_length) {
                 None => None,
                 Some(text) => match max_length(&text) {
                     Some(length) => Some(length),
                     None => {
-                        lines.push(length_line(row, grid));
+                        lines.push(length_line(row, grid, &mut shown));
                         continue;
                     }
                 },
@@ -614,13 +615,35 @@ impl SentFields {
 /// Build the line of a bad maximum length under the input of the leaf path of the row.
 ///
 /// The grid names the input by the leaf path, because the copy of a mixed type level gives its
-/// rows new numbers. Without that input, the line keeps the id of the sent row number.
-fn length_line(row: &SentLimit, grid: Option<&GridView>) -> FieldError {
-    let shown = grid.and_then(|grid| grid.input_id(&row.leaf_path, LeafInput::LimitMaxLength));
+/// rows new numbers. Without that input, the sent row number can name the input of another
+/// leaf. Then the line has no input and shows only in the summary. When the sent row number
+/// names no input of the grid, or when no grid exists, the line keeps the sent id.
+///
+/// `shown` holds the ids of the maximum length inputs of the grid. The first line that needs
+/// them fills it, so one answer scans the grid at most once.
+fn length_line<'g>(
+    row: &SentLimit,
+    grid: Option<&'g GridView>,
+    shown: &mut Option<BTreeSet<&'g str>>,
+) -> FieldError {
+    let sent = limit_input_id(row.index, "max_length");
+    let input = match grid {
+        None => sent,
+        Some(grid) => grid
+            .input_id(&row.leaf_path, LeafInput::LimitMaxLength)
+            .unwrap_or_else(|| {
+                let ids = shown.get_or_insert_with(|| grid.max_length_ids().collect());
+                if ids.contains(sent.as_str()) {
+                    String::new()
+                } else {
+                    sent
+                }
+            }),
+    };
     FieldError::bad_input(
         "field-limit-max-length",
         vec![("leaf", row.leaf_path.to_string())],
         FieldReason::MaxLength,
-        shown.unwrap_or_else(|| limit_input_id(row.index, "max_length")),
+        input,
     )
 }

@@ -331,6 +331,15 @@ impl GridView {
         found.into_iter().map(|(_len, id)| id).collect()
     }
 
+    /// Return the `id` of each maximum length input that the grid shows.
+    pub(crate) fn max_length_ids(&self) -> impl Iterator<Item = &str> {
+        self.bodies
+            .iter()
+            .flat_map(|body| body.rows.iter())
+            .filter_map(GridRow::leaf)
+            .filter_map(|row| row.max_length.as_ref().map(|cell| cell.id.as_str()))
+    }
+
     /// Return the text of each input of the grid by the `id` of the input.
     ///
     /// A closed group is part of the result, because its inputs still submit.

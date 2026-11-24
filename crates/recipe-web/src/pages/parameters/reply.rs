@@ -520,15 +520,28 @@ pub(crate) async fn failed(
     if matches!(error, AppError::ConcurrentEdit { .. }) {
         return conflict(ctx.state, ctx.request, error).await;
     }
+    // An error without lines gives no form, so it builds no grid (ADR-0223 (p)). The mapping does
+    // not depend on the grid, so a closure without inputs gives the same decision.
+    if error_lines(&error, &|_fault| None).is_none() {
+        return WebError::App(missing_key(error));
+    }
     // The grid comes after the refusal, so a conflict and a success build none (ADR-0223 (p)).
     let shown = sent_shown(ctx, form, sent, previewed);
     let lines = {
         let grid: Option<&GridView> = shown.grid.as_ref();
-        command_lines(&error, &|fault| grid.and_then(|grid| grid.input_of(fault)))
-            .or_else(|| domain_line(&error, None).map(NonEmpty::new))
+        error_lines(&error, &|fault| grid.and_then(|grid| grid.input_of(fault)))
     };
     match lines {
         Some(lines) => refuse(ctx, form, shown, lines),
         None => WebError::App(missing_key(error)),
     }
+}
+
+/// Return the lines of a refused draft command: the lines under inputs, or one line of a domain
+/// error without an input. `None` means that the error gives no form.
+fn error_lines(
+    error: &AppError,
+    input_id: &dyn Fn(&RecipeError) -> Option<String>,
+) -> Option<NonEmpty<FieldError>> {
+    command_lines(error, input_id).or_else(|| domain_line(error, None).map(NonEmpty::new))
 }
