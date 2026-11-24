@@ -33,30 +33,36 @@ use crate::test_support::heap::{BodyDigest, peak_in, peak_of};
 use crate::test_support::plant::{ENGLISH, HTMX, POLISH, World};
 
 /// The number of `x` in `description_en` of the body.
-const PADDING: usize = 4_600_000;
+pub(super) const PADDING: usize = 4_600_000;
 /// The long prefix of `LDT` (ADR-0205). It is 11 bytes longer than `LDT#`.
 const ALIAS_PREFIX: &str = "LDATE_AND_TIME#";
 /// The length of the body in bytes (`design.md`, round 1 of the paused change).
-const BODY_BYTES: usize = 16_758_074;
+pub(super) const BODY_BYTES: usize = 16_758_074;
 /// The SHA-256 of the body in lowercase hexadecimal.
-const BODY_SHA256: &str = "bef1574257ef4baa65a9f61e4b96f981255100359efeedfee6d3a7b1077dd6bd";
-/// Return the pairs of the form of round 1: `form_pairs` with the long text and the alias prefix.
+pub(super) const BODY_SHA256: &str =
+    "bef1574257ef4baa65a9f61e4b96f981255100359efeedfee6d3a7b1077dd6bd";
+/// Return `form_pairs` with `description_en` and the alias prefix.
 ///
-/// Each `LDT` text of a value, a minimum, and a maximum gets the prefix `LDATE_AND_TIME#`.
-fn refused_pairs() -> Vec<(String, String)> {
-    let padding = "x".repeat(PADDING);
+/// Solves the problem that the round 1 body and the round 2 body need one alias map. Each `LDT`
+/// text of a value, a minimum, and a maximum gets the prefix `LDATE_AND_TIME#`.
+pub(super) fn aliased_pairs(description_en: &str) -> Vec<(String, String)> {
     form_pairs()
         .into_iter()
         .map(|(name, text)| {
             let aliased =
                 name.starts_with("value[") || name.ends_with(".min") || name.ends_with(".max");
             match name.as_str() {
-                "description_en" => (name, padding.clone()),
+                "description_en" => (name, description_en.to_owned()),
                 _other if aliased => (name, text.replacen("LDT#", ALIAS_PREFIX, 1)),
                 _other => (name, text),
             }
         })
         .collect()
+}
+
+/// Return the pairs of the form of round 1: the alias form with the long text.
+fn refused_pairs() -> Vec<(String, String)> {
+    aliased_pairs(&"x".repeat(PADDING))
 }
 
 /// Return the body of round 1 and check its length and SHA-256.

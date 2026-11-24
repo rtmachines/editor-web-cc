@@ -102,7 +102,7 @@ pub(super) fn ldt_count(text: &str) -> i64 {
 }
 
 /// Return the nested JSON that opens the level `level`. `next` is the number of the next leaf.
-fn nested(level: usize, next: &mut usize) -> Value {
+pub(super) fn nested(level: usize, next: &mut usize) -> Value {
     if level == LEVELS {
         let count = ldt_count(&value_text(*next));
         *next = next.checked_add(1).unwrap();

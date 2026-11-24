@@ -1,0 +1,275 @@
+# Tasks
+
+Marks: `[opus]` is an ADR text (Opus). `[mechanical]` is a Haiku task. `[deploy]` is a Codex task. A task without a mark is a Sonnet task. Run every command from the root of the worktree.
+
+## Order and shared files
+
+- Group 1 comes first, because the ADR is the authority of the code. Task 1.4 also comes before group 2.
+- Task 2.1 comes before task 2.2, and task 2.2 comes before task 2.3. Task 2.1 reports the byte recipe and the four pins. Task 2.2 copies them into `design.md` D6.
+- Tasks 2.3, 2.4, 2.5, and 2.10 change `deploy/ci/load_value.py` and `deploy/ci/test_load_value.py`.
+- Tasks 2.6 to 2.9 change other files of `deploy/ci/` and `.github/workflows/ci.yml`.
+- Tasks 2.3 to 2.10 use the names of the section "Interfaces" of `design.md`.
+- Run tasks 2.3 to 2.10 one after the other, because `deploy/ci/check.sh` runs every `deploy/ci/test_*.py`.
+- Group 3 pushes the branch and dispatches CI. Each push needs the approval of the owner.
+- The owner decided the gate of round 1 on 2026-11-24 (`design.md` D8). Round 1 only reports its peak, and round 2 keeps the gate of the ceiling.
+
+## 1. ADR text
+
+- [x] 1.1 (docs/adr) [opus] D1 to D7. Write `docs/adr/0222-memory-of-the-value-bodies-under-load.md` in the shape of ADR-0211. Items:
+  - (a) the ceiling, the metric, and the musl gate of D1. Name the two rounds, each on its own new container `app`, and the gate on the peak of each round. This item amends ADR-0128 (ac) for the value leg.
+  - (a) also names the rejected option of one container for both rounds.
+  - (b) the `503` of D2, which stays with the route test.
+  - (c) the two rounds of D3 and the overlap proof of D4 for each round. Name the limit of the parse stages on two Tokio workers.
+  - (c) also says that the leg cannot detect extra permits. `fifth_value_body_waits_and_gets_e_web_009` stays the test of the permit count.
+  - (c) also names a known limit: no test proves the place of `leaf_texts` in `prepare`. A code reference to `prepare.rs` line 148 pins it, and the order test of D6 pins the limit list.
+  - (d) the order of the steps of D5. This item amends ADR-0128 (j) and (k).
+  - (e) the eight job readings and the peak of the whole run of D1. This item amends ADR-0128 (y) and (aa).
+  - (f) the measured value of D7. This item amends ADR-0211 (p).
+  - Name the rejected options of D1 and D2.
+  - Add four notes to the Status line of ADR-0128. Write each note as a separate sentence:
+    - "Amended by ADR-0222 (items (j) and (k): the order of the steps)."
+    - "Amended by ADR-0222 (item (y): the readings of the value leg)."
+    - "Amended by ADR-0222 (item (aa): the peak of the whole run and the role of `anon`)."
+    - "Amended by ADR-0222 (item (ac): the value leg)."
+  - Add to the Status line of ADR-0211: "Amended by ADR-0222 (item (p): a measured value)".
+  - Red test: none, because this task writes a document. Check: `python -I tools/ste-lint/ste-lint.py docs/adr/0222-*.md docs/adr/0128-*.md docs/adr/0211-*.md` gives 0 hard violations.
+  - The Status line ends without a period, as the other Status lines (owner, 2026-11-22).
+  - Task 1.4 limits the gate of item (a) to round 2 (`design.md` D8).
+- [x] 1.2 (docs/adr) [mechanical] Add the index row of ADR-0222 to `docs/adr/README.md`. Copy the new Status lines of ADR-0128 and ADR-0211 into their index rows.
+  - In the decision map row "Test gates", the entry "Load level: 0128 (...)" names the load job. Add "Also 0222 (the value leg, the ceiling of the musl leg, the readings of the value leg)" after it.
+  - Red test: none, because this task writes a document. Check: `grep -c '^| \[0222\]' docs/adr/README.md` gives 1, and `python -I tools/ste-lint/ste-lint.py docs/adr/README.md` gives 0 hard violations.
+- [x] 1.3 (docs/architecture) [mechanical] ADR-0222 (a), (b). In the Load row of `reliability.md` §6, replace the two sentences on the value routes.
+  - The new text: on the musl leg, two rounds of four parallel value bodies keep `memory.peak` of `app` below `soak.memory_ceiling` (ADR-0222).
+  - Each round runs on its own new container `app`. The `cc-debian13` leg reports only.
+  - Round 1 sends bodies of nearly 16 MiB that get `422` for `description_en`. Round 2 sends the write form.
+  - The route test of the permits checks the `503 E-WEB-009` after a long wait (ADR-0211).
+  - Task 1.4 limits the gate of this row to round 2 (`design.md` D8).
+  - Red test: none, because this task writes a document. Check: `python -I tools/ste-lint/ste-lint.py docs/architecture/reliability.md` gives 0 hard violations.
+- [x] 1.4 (docs/adr) [opus] D6, D8. Apply the owner decision of 2026-11-24 to the ADR text. Round 1 only reports its peak, and round 2 keeps the gate of the ceiling.
+  - ADR-0222 (a): the absolute peak of the round 2 reading must be below `soak.memory_ceiling`. The ceiling, the cases of ADR-0128 (z), and the restart count of the round 1 reading only report.
+  - ADR-0222 (a): a value of the round 1 reading that is `unavailable` or not a number still fails both legs. Round 1 keeps its answer, `row_version`, and overlap checks.
+  - ADR-0222 (a): change B turns the gate of round 1 on again. Item (a) thus also amends ADR-0128 (z). Add (z) to the Status line and to the section "Related" of ADR-0222.
+  - ADR-0222, the heading of Option A and the section "Decision": the ceiling applies to round 2. Name the owner decision of 2026-11-24.
+  - ADR-0222 (f): the job `load` checks the ceiling on round 2 of the musl leg and reports round 1 only.
+  - ADR-0222, section "Risks and mitigations": the risk of a peak at 384 MiB names round 2. Add the risk of an OOM kill in round 1 and its stop rule of `design.md` D8.
+  - ADR-0128, Status line: add the note "Amended by ADR-0222 (item (z): the round 1 reading only reports)." as a separate sentence.
+  - `docs/adr/README.md`: copy the new Status lines of ADR-0222 and ADR-0128 into their index rows. In the decision map row "Test gates", the entry "Also 0222 (...)" names the ceiling of round 2.
+  - The Load row of `reliability.md` §6: round 2 keeps `memory.peak` of `app` below `soak.memory_ceiling` on the musl leg. Round 1 only reports its peak.
+  - No other document states the gate of round 1. Task 4.1 changes `reliability.md` §7.8, and task 4.2 writes `CHANGELOG.md`.
+  - ADR-0222 (c), known limit: the route test with the bad `max_length` text proves only that round 1 reaches the check of the limit rows.
+  - ADR-0222 (c): a code reference to `prepare.rs` line 149 pins the order of the limit list, as line 148 pins `leaf_texts` (`design.md` D6).
+  - ADR-0222, the risk of a later change of `prepare`: the route test fails when round 1 skips the check of the limit rows.
+  - ADR-0222, the risk of extra permits: the mutation keeps extra copies of each round 2 body only (`design.md` D8).
+  - Red test: none, because this task writes a document.
+  - Check: `openspec validate value-body-memory-load --strict` passes, and `python -I tools/ste-lint/ste-lint.py docs/adr/0222-*.md docs/adr/0128-*.md docs/adr/README.md docs/architecture/reliability.md` gives 0 hard violations.
+  - Check: `grep -c 'each round reading must be below' docs/adr/0222-*.md` gives 0.
+
+## 2. Code and CI scripts
+
+- [x] 2.1 (recipe-web) D3, D6. Port the old tests of this task onto the layout of change A.
+  - The old diff is the part of `route_tests.rs` in `/home/rtm/editor-web-cc-archive/value-body-memory-load/backup-before-main-66cb8e9/tracked.patch`.
+  - The old helpers are in the untracked file `crates/recipe-web/src/pages/parameters/route_tests/value_leg_kit.rs`. No `mod` declares it on `main`, so nothing compiles it now.
+  - Do not apply the part of `test_support.rs`. `main` has `call_bounded`, `post_fields_bounded`, and `form_request` with the same signatures. Add no copy of them.
+  - Put the three tests into a new file `route_tests/value_leg_tests.rs`. In `route_tests.rs`, declare it and `value_leg_kit` with `#[cfg(test)] mod`, next to `largest_form_tests`.
+  - Keep `largest_edit_form_fits_the_value_limit` unchanged.
+  - Reuse these items of `main`. Make an item `pub(super)` only when the new file needs it:
+    - `largest_form_world`, `form_pairs`, `REFERENCE`, `KEY`, `VERSION_ID`, and `nested` of `largest_form_tests.rs`.
+    - `refused_pairs`, `PADDING`, `ALIAS_PREFIX`, `BODY_BYTES`, and `BODY_SHA256` of `largest_refused_tests.rs`.
+    - The round 1 pins have one owner: `BODY_BYTES` and `BODY_SHA256`. They equal `FULL_FORM_BYTES` and `FULL_FORM_SHA256` of the old diff. Add no `FULL_FORM_*` constant.
+    - `definition_path` of `measure_kit.rs`, `form` of `test_kit.rs`, and `BodyDigest` of `test_support/heap.rs`.
+  - Move the alias map of `refused_pairs` into one function with the description as an argument. The round 1 body and the round 2 body then use one map.
+  - Remove `body_of` and `sha256_hex` from `value_leg_kit.rs` when `form` and `BodyDigest` give the same bytes and hash. Keep `field_lines`.
+  - Set `ANSWER_LIMIT` of the new file to 32 MiB (33 554 432 bytes), not 192 MiB. The pin `REFUSED_PAGE_EN` of `largest_refused_tests.rs` gives the longest round 1 page: 27 708 942 bytes.
+  - `value_leg_write_form` builds the round 2 body: the write form of D3, with `LDATE_AND_TIME#` for every `LDT` text and the fixture bounds of D6.
+  - It asserts `303` with the exact `Location` on the in-memory store. It pins `WRITE_FORM_BYTES` and `WRITE_FORM_SHA256` (lowercase hex).
+  - `value_leg_full_form` builds the round 1 body: the write form with an over-long `description_en`. Only `description_en` gets a line.
+  - It asserts that the encoded length lies in the window from 16 711 680 to 16 777 216 bytes. It pins `FULL_FORM_BYTES` and `FULL_FORM_SHA256`.
+  - It reads the answer with `post_fields_bounded`. It asserts `422`, a `field_lines` list equal to the one pair `("description_en", "E-WEB-008")`, and no write.
+  - When the list holds another line, stop and report the list.
+  - It also asserts that the field pattern and the code pattern of the section "Interfaces" match the one field line.
+  - `value_leg_refusal_order` sends the round 1 body with one bad `max_length` text in one limit row. Its `description_en` padding is shorter by the length of the extra pair.
+  - It asserts `422` with the line of `description_en` and the line of that limit row. Thus the round 1 body reaches the check of the limit rows.
+  - `refuse_checked` builds the line of the limit row again, so the answer does not prove the order. Report the code reference to `prepare.rs` line 149 (`design.md` D6).
+  - The grid of the fixture has no `max_length` input, so `length_line` keeps the sent id (D6). The summary thus holds `href="#limits-0-max_length"`. When the answer has no line of the limit row, stop and report.
+  - Keep the four pins of the old diff: `WRITE_FORM_BYTES` 12 158 101, `WRITE_FORM_SHA256` `09ff2cf4...2dc9`, and the round 1 pins 16 758 074 and `bef15742...d6bd`.
+  - D6 and the Python tests keep the names `FULL_FORM_BYTES` and `FULL_FORM_SHA256` for the round 1 pins.
+  - Evidence: the FULL pins equal `BODY_BYTES` and `BODY_SHA256` of `largest_refused_tests.rs`. The WRITE length is 11 617 429 + 3 × 16 384 × 11 = 12 158 101 bytes.
+  - When the port gives another value, stop and report the old and the new value.
+  - The three tests have no `#[ignore]` (owner, 2026-11-24, `design.md` D6). They pin a length and a SHA-256, so the normal test run must catch a change.
+  - Each test builds a body of at most 16 MiB and reads an answer of at most 32 MiB.
+  - After a first build, get the full path of each test from `cargo test -p recipe-web --all-features --locked --lib value_leg_ -- --list`.
+  - Run `cargo test -p recipe-web --all-features --locked --lib -- --exact <path>` once for each of the three paths.
+  - The time of a test is the value of the libtest line `finished in`. Use only a run in which libtest reports `1 passed`. Report each time.
+  - Stop condition: when one test takes more than 30 s, stop and report it to the owner.
+  - Fact: no value field gives a line in `leaf_texts`, because the reader refuses each bad value key first (ADR-0138). Report this fact.
+  - Stop condition: if a change of `prepare` makes the refusal come before `leaf_texts` or `limit_list`, stop and report the code path.
+  - Facts: the alias form has 12 158 101 bytes. A valid `LDT` form has at most about 13 206 677 bytes.
+  - Report the byte recipe of both bodies to the orchestrator: the ordered head pairs with their values and the fixture bounds.
+  - The recipe also holds the leaf order, the value, minimum, and maximum texts, the `description_en` padding, and the four pins.
+  - Red test: the port adds no new behavior, so the red step uses two runs.
+    1. Set `BODY_BYTES` to 16 758 073 and `WRITE_FORM_BYTES` to 12 158 100. See the three tests fail on the length with the real values. Set the pins again.
+    2. Expect `#limits-1-max_length` in the order test. See that test fail on the link. Set `#limits-0-max_length` again.
+  - Check: `cargo test -p recipe-web --all-features --locked value_leg_` passes and runs three tests. `cargo clippy -p recipe-web --all-targets --all-features -- -D warnings` and `cargo fmt --check` pass.
+  - Check: `RUSTFLAGS="--cfg heap_measure" CARGO_TARGET_DIR=target/heap cargo test -p recipe-web --all-features --locked largest_refused -- --ignored --test-threads=1` passes, because the port changes `refused_pairs`.
+- [x] 2.2 (openspec) [mechanical] D6. Copy the byte recipe and the four pins of task 2.1 into the list "Byte recipe" of `design.md` D6. Replace each `<task 2.2>`.
+  - Red test: none, because this task writes a document.
+  - Check: `grep -c '<task 2.2>' openspec/changes/value-body-memory-load/design.md` gives 0, and `openspec validate value-body-memory-load --strict` passes.
+- [x] 2.3 (deploy/ci) [deploy] D6, Interfaces. Add the generator of the two bodies to a new file `deploy/ci/load_value.py`. Add `deploy/ci/test_load_value.py`.
+  - The generator builds an ordered list of pairs for each round with the byte recipe of `design.md` D6.
+  - The generator takes the round, `row_version`, `unit_path`, and `ordinal` as arguments.
+  - The encoder uses `urllib.parse.quote(value, safe="")` on each key and each value and joins the pairs with `&`. A space is `%20`.
+  - With the head of the route test, the test asserts the four pins of D6.
+  - Red test: first add a generator stub that returns two bodies with a one-byte change. The test must reach the comparison and fail on the pins. Then write the generator.
+  - Check: `python3 -I -B deploy/ci/test_load_value.py` passes.
+- [x] 2.4 (deploy/ci) [deploy] D4, D5, Interfaces. Add the commands `round` and `single` to `deploy/ci/load_value.py`.
+  - `round` uses four threads and one shared deadline of 8 s from the common start of the round. It uses a socket timeout and a TLS check with `--cacert`.
+  - It sends the pinned bytes directly, with `X-CSRF-Token`, `Origin`, and the session cookie from the state file.
+  - At the barrier, it reads `anon` of `memory.stat` of the cgroup path of `--cgroup`. It reads `anon` again until the rise over `--reference-anon` reaches 4 × the body length or the shared deadline ends.
+  - It bounds the collection of the answers by 30 s (`http.request_timeout`). It reads each answer to its end and records the answer object of the section "Interfaces".
+  - It keeps no HTML and no token. It reads `MemAvailable` at the barrier and after the last answer, and records the smaller value.
+  - `single` sends one body to the draft of `--reference` and records one answer object.
+  - Red test in `deploy/ci/test_load_value.py`: a local test server with a small `SO_RCVBUF` reads one body at a time.
+  - The client must fail with "round 1: request <reference> did not reach the barrier".
+  - A second case reads four bodies in parallel, and a fake `memory.stat` shows a small rise. The client must fail with "round 1: the bodies did not overlap".
+  - A third case reads four bodies in parallel with a large rise and passes. The test peer hashes the bytes that it receives and compares them with the pin of D6.
+  - A fourth case answers `422` with a large page and a field line. The answer object must hold the code and the field, and the file must hold no HTML.
+  - A fifth case runs `single` and checks its answer object.
+  - Check: `python3 -I -B deploy/ci/test_load_value.py` passes.
+- [x] 2.5 (deploy/ci) [deploy] D1, D3, D5, D7, D8, Interfaces. Add the commands `check-precheck`, `check-round`, and `check` to `deploy/ci/load_value.py`.
+  - `check-precheck` requires `422` with the first field line `E-WEB-008` under `description_en`. Then it requires `303` with the exact `Location` of `LOAD-V5` and a larger `row_version`.
+  - `check-round --round 1` requires four answers `422`, each with the first field line `E-WEB-008` under `description_en`. It also requires the `row_version` of the state file for `LOAD-V1` to `LOAD-V4` and the `row_version` of `load-value-versions-precheck.json` for `LOAD-V5`.
+  - `check-round --round 1` also requires a live body length in the window of D3.
+  - `check` reads both answers files, the state file, the version files, and the value readings. It fails on each case of the two requirements of the change and on the bounds of ADR-0128 (z).
+  - The round 1 reading is the exception of D8. Its peak, its bounds of ADR-0128 (z), and its restart count only go into the summary. A missing or invalid value still fails.
+  - Round 2: `check` requires `303` with the exact `Location` of D3 and a larger `row_version` for each draft of `LOAD-V1` to `LOAD-V4`. `LOAD-V5` keeps the `row_version` of the pre-check.
+  - `check` collects every failure into `failures`. It does not stop at the first failure.
+  - `check` requires a different container ID for each round and the same ID for a round and its baseline. It requires the same four distinct draft keys in both rounds.
+  - The gate is the `memory.peak` of the round 2 reading. The failure text is "round 2 reading reached the ceiling of 384 MiB".
+  - It writes `load-value.json` and the summary lines. The summary shows the elapsed time of the job and of the leg.
+  - The summary also shows, for each round, the container ID, the baseline, the peak, the body length, the run statistic, and the smallest `MemAvailable`.
+  - The summary shows each run statistic next to 3 × the body length of its round.
+  - Red test: one case for each scenario that the checker owns, each one before the code that makes it pass. Tasks 2.4, 2.9, and 2.10 own the other scenarios.
+  - A red case has round 1 at 384 MiB and round 2 below 384 MiB. The check must pass and show the round 1 peak in the summary.
+  - A second red case has round 1 below 384 MiB and round 2 exactly at 384 MiB, and must name round 2.
+  - A third red case gives the round 1 reading one condition of ADR-0128 (z) in each subtest. The conditions are `oom` 1, `oom_kill` 1, `max` 1, `OOMKilled` `true`, `RestartCount` 1, and a peak of 536 870 912 bytes.
+  - Each subtest of the third case must pass and show the value in the summary. A fourth red case has a round 1 peak `unavailable` and must fail.
+  - A fifth red case has round 2 at 384 MiB and one round 2 answer `409`. `failures` must hold both failures.
+  - A red case of `check-round --round 1` has `LOAD-V5` at the `row_version` of the pre-check, above the state file. The check must pass.
+  - Check: `python3 -I -B deploy/ci/test_load_value.py` passes.
+- [x] 2.6 (deploy/ci) [deploy] D3, D5, Interfaces. Add the command `value` to `deploy/ci/load_seed.py`. It seeds the five machines `M9000002` to `M9000006` and the drafts `LOAD-V1` to `LOAD-V5`.
+  - Each draft gets `BIG` of the type `LDT` with the value `LDT#1970-01-01-00:00:00.000000001`.
+  - The command logs in once and writes `load-value-state.json` with mode 0600 in `$CI_STATE`, with the keys of the section "Interfaces".
+  - Red test in `deploy/ci/test_load_seed.py`: a fake client checks the fields of each seed request, also the `value` of `BIG`.
+  - A second test checks the mode 0600 and the five distinct records of the state file.
+  - Check: `python3 -I -B deploy/ci/test_load_seed.py` passes.
+- [x] 2.7 (deploy/ci) [deploy] D1, D5, Interfaces. Add the steps `value-seed`, `value`, and `value-check` to `deploy/ci/load.sh`.
+  - `value-seed` runs `load_seed.py value` and then takes the reading `value-seed`.
+  - `value` runs the eight actions of D5 in their order, with the commands of the section "Interfaces".
+  - `read_memory` also records `memory.current` and the container ID. It reads `memory.current` separately, like `oom`, so `memory_cgroup` of `memory.sh` stays unchanged.
+  - Red test in `deploy/ci/test_load_sh.py`: `value` reads the retiring container before each `recreate_app`. It takes a baseline reading after each `recreate_app` and before the round.
+  - A second test: a failed pre-check stops the leg before `recreate_app`.
+  - A third test: a failed client of round 1 stops the leg before the second `recreate_app` and keeps the round 1 reading.
+  - A fourth test: a failed check of round 1 also stops the leg before the second `recreate_app` and keeps the round 1 reading.
+  - `value-seed` also writes `$CI_STATE/load-value-leg-start`, and `value-check` passes `$RUNNER_TEMP/load-job-start` with `--job-start`.
+  - Check: `python3 -I -B deploy/ci/test_load_sh.py` passes.
+- [x] 2.8 (deploy/ci) [deploy] D1, D8, Interfaces. In `deploy/ci/load_memory.py`, check the eight job readings of D1. The peak of the whole run is the largest of the eight peaks.
+  - The bounds of ADR-0128 (z) gate each reading except `value-round-1`. That reading only reports them, but a missing or invalid value still fails (D8).
+  - `load.sh memory-check` passes the six value readings with `--value`. `load-memory.json` keeps the flood reading and the value readings separate.
+  - With `--value`, `load_memory.py` requires each of the six value phases. Without `--value`, it checks the two old readings only.
+  - `load.sh` without an argument (`all`) keeps its steps: the timings reading, the flood, and the check of two readings without `--value`.
+  - The tests that run `load.sh` without an argument stay unchanged.
+  - Red test in `deploy/ci/test_load_memory.py`: a `value-precheck` reading with the largest peak gives that peak as the peak of the whole run.
+  - A second test: a missing value reading fails the check.
+  - A third test gives a `value-round-1` reading one condition of ADR-0128 (z) in each subtest. The conditions are `oom` 1, `oom_kill` 1, `max` 1, `OOMKilled` `true`, `RestartCount` 1, and a peak of 536 870 912 bytes.
+  - Each subtest of the third test must pass and report the value. The same value in `value-round-2` must fail the check.
+  - A fourth test: a `value-round-1` reading with a peak `unavailable` fails the check.
+  - Change `test_separate_steps_keep_both_memory_readings` of `deploy/ci/test_load_sh.py`. It writes the six value readings, and `memory-check` must pass them with `--value`.
+  - That test also requires eight readings in `load-memory.json`. A further test removes one value reading file, and `memory-check` must fail and name its phase.
+  - Check: `python3 -I -B deploy/ci/test_load_memory.py` and `python3 -I -B deploy/ci/test_load_sh.py` pass.
+- [x] 2.9 (deploy/ci) [deploy] D5, Interfaces. Change the job `load` of `.github/workflows/ci.yml`.
+  - The step "Check the runner before the stack" also writes the start time of the job to `$RUNNER_TEMP/load-job-start`, as one line of epoch seconds.
+  - Add `value-seed` after "Read memory after the timings" and before the flood. Add `value` after the flood.
+  - Move the memory check after `value` and name it "Check the memory readings and report the memory condition". Add `value-check` after it.
+  - Give each new step `timeout-minutes`. Give `value` and `value-check` the `continue-on-error` of the flood steps. `value-seed` gets none.
+  - Add the values of `load-value.json` and the value readings to "Require the values from each leg". Add `load-value.json` to the artifact.
+  - Give `value`, the memory check, `value-check`, and "Require the values from each leg" the condition `${{ !cancelled() && steps.seed.outcome == 'success' }}`.
+  - Thus `value-check` also runs after a failed `value`. Keep the condition of the upload step.
+  - Extend the step order and the structure check of the job `load` in `deploy/ci/check.sh`.
+  - Red test: the structure check refuses the workflow of `origin/main`, because it has no value leg.
+  - The structure check also refuses a `value-check` step without the `continue-on-error` of `cc-debian13` (scenario "Peak at the ceiling on the cc-debian13 leg").
+  - A test of "Require the values from each leg" fails on a missing value reading (scenario "Missing memory value of the value leg").
+  - The structure check also refuses a `value-check` step without `!cancelled()` in its condition (scenario "Round 1 ends without answers").
+  - Check: `bash deploy/ci/check.sh` passes.
+- [x] 2.10 (deploy/ci) [deploy] D5, D8, Interfaces. In `check` of `deploy/ci/load_value.py`, report a leg that stopped before round 2.
+  - When round 2 did not run, `check` writes the summary lines of each file that exists. It also writes the OOM counts of round 1 and the cause of the stop.
+  - Then `check` writes `load-value.json` with `passed` equal to `false` and fails.
+  - Red test in `deploy/ci/test_load_value.py`: four round 1 answers without a status and no round 2 files. The check must fail and name round 1.
+  - The same test requires the peak and the OOM counts of the round 1 reading in the summary (scenario "Round 1 ends without answers").
+  - Check: `python3 -I -B deploy/ci/test_load_value.py` passes.
+
+## 3. Proof on the branch
+
+Each `[deploy]` task of this group pushes to the branch and dispatches `ci.yml` with `workflow_dispatch`. The owner approves each push. Do not touch `~/Documents/recepty-edytor-test` or its containers.
+
+In each `Check:` command, `<run>` is the ID of the dispatched run. `<musl job>` is the ID of the job `Load (musl)` of that run.
+
+- [ ] 3.1 (deploy) [deploy] D1, D4, D8. Push the branch. Run `gh workflow run ci.yml --ref "$(git branch --show-current)"`.
+  - Read the value leg of the musl leg. When the peak of the round 2 reading of the musl leg is at or above 384 MiB, stop and ask the owner. The round 1 reading and the `cc-debian13` leg report only.
+  - When round 1 fails an answer, `row_version`, or overlap check, stop and ask the owner. Round 2 then does not run.
+  - After a stop in round 1, the job has no artifact. Then take the values of round 1 from the job summary of the run.
+  - Report the OOM counts and the restart count of round 1 also when its checks pass. These counts do not stop the task (D8).
+  - Read `failures` of `load-value.json` of the artifact `load-cc-debian13`. When it names an answer, a `row_version`, or the overlap, stop and ask the owner.
+  - Report the peak and the body length of each round and the smallest `MemAvailable` of each round to the orchestrator. Task 3.5 uses the values of both rounds.
+  - Red test: none, because this task is a measurement.
+  - Check: `gh run view <run> --json jobs --jq '.jobs[] | select(.name == "Load (musl)") | [.conclusion, .startedAt, .completedAt]'` shows `success`.
+  - Check: `gh run view <run> --json jobs --jq '.jobs[] | select(.name == "Load (musl)") | ((.completedAt | fromdate) - (.startedAt | fromdate))'` gives at most 3300.
+  - Thus a reserve of at least 5 minutes remains before `timeout-minutes: 60`.
+  - Check: `gh run download <run> -n load-musl` gives `load-value.json` with the elapsed times and the container ID, peak, body length, and run statistic of each round.
+- [ ] 3.2 (recipe-web) D2. Mutation A. Make a temporary commit that sets `DEFAULT_VALUE_BODY_PERMITS` to 1 in `crates/recipe-web/src/settings.rs`.
+  - Record the commit SHA of `git rev-parse HEAD` as `MUTATION_A` in the report.
+  - Red test: the mutation itself.
+  - Check: `git show --stat HEAD` names only `crates/recipe-web/src/settings.rs`, and `cargo build -p recipe-web` passes.
+- [ ] 3.3 (deploy) [deploy] D4. Push mutation A and dispatch `ci.yml`. Round 1 of `Load (musl)` at `MUTATION_A` must fail on the overlap.
+  - The expected error is "round 1: request <reference> did not reach the barrier" or "round 1: the bodies did not overlap".
+  - Red test: the mutation of task 3.2.
+  - Check: `gh run view <run> --json headSha --jq .headSha` gives `MUTATION_A`.
+  - Check: `gh run view <run> --job <musl job> --log | grep -E 'round 1: (request LOAD-V[1-4] did not reach the barrier|the bodies did not overlap)'` gives a line.
+- [ ] 3.4 (recipe-web) [mechanical] Revert mutation A with `git revert --no-edit <MUTATION_A>`.
+  - Red test: none, because this task reverts a mutation.
+  - Check: `git diff <MUTATION_A>~1 HEAD -- crates/recipe-web/src/settings.rs` is empty.
+- [ ] 3.5 (recipe-web) D1, D8. Mutation B. Make a temporary commit in `crates/recipe-web/src/csrf.rs`. `csrf_layer` keeps N extra copies of each round 2 value body until the handler returns.
+  - Each copy is a new allocation of the bytes, not a clone of `Bytes`.
+  - Take P2, the round 2 peak, and B2, the round 2 body length, from task 3.1. N is the smallest integer with P2 + 4 × N × B2 at or above 384 MiB.
+  - When P2 + 4 × N × B2 is at or above 512 MiB, stop and ask the owner.
+  - Keep the copies only for a value body below 16 711 680 bytes, the start of the window of D3. Use the length of the buffered `Bytes`.
+  - Thus a round 1 body gets no copies. The round 2 body of the pre-check also gets copies.
+  - Record N and the commit SHA of `git rev-parse HEAD` as `MUTATION_B` in the report.
+  - Red test: the mutation itself.
+  - Check: `git show --stat HEAD` names only `crates/recipe-web/src/csrf.rs`, and `cargo build -p recipe-web` passes.
+- [ ] 3.6 (deploy) [deploy] D1, D8. Push tasks 3.4 and 3.5 and dispatch `ci.yml`. The musl leg must fail on the ceiling of round 2.
+  - Round 1 must pass its answer checks. Round 2 must finish with zero OOM events, and its peak must lie from 384 MiB to below 512 MiB.
+  - When the run misses one of these conditions, stop and ask the owner.
+  - This proves the sensitivity of the gate.
+  - Red test: the mutation of task 3.5.
+  - Check: `gh run view <run> --json headSha --jq .headSha` gives `MUTATION_B`.
+  - Check: `gh run view <run> --job <musl job> --log | grep -F 'round 2 reading reached the ceiling of 384 MiB'` gives a line.
+  - Check: `load-value.json` of `gh run download <run> -n load-musl` has two rounds and a round 2 peak from 402 653 184 to 536 870 911 bytes.
+  - Check: `load-memory.json` of the same artifact has `oom_kill`, `oom`, and `max` equal to 0 in the readings `value-baseline-2` and `value-round-2`.
+  - Check: `jq -e '.failures == ["round 2 reading reached the ceiling of 384 MiB"]'` on `load-value.json` of the same artifact gives `true`.
+- [ ] 3.7 (recipe-web) [mechanical] Revert mutation B with `git revert --no-edit <MUTATION_B>`.
+  - Red test: none, because this task reverts a mutation.
+  - Check: `git diff origin/main -- crates/recipe-web/src/settings.rs crates/recipe-web/src/csrf.rs` is empty.
+- [ ] 3.8 (deploy) [deploy] D1, D8. Push the revert and dispatch `ci.yml` on the reverted SHA. The round 1 reading only reports, so both legs can pass before change B.
+  - Red test: none, because this task proves the revert.
+  - Check: `gh run view <run> --json headSha,jobs` shows the `headSha` of `git rev-parse HEAD` and `success` for both legs of the job `load`.
+  - Read `failures` of `load-value.json` of the artifact `load-cc-debian13`. When it names an answer, a `row_version`, or the overlap, stop and ask the owner.
+
+## 4. Record
+
+- [ ] 4.1 (docs/architecture) [mechanical] D7, D8, ADR-0222 (f). In `reliability.md` §7.8, replace "about 4 × 48 MiB" with the peak, the body length, and the run statistic of each round of task 3.1.
+  - Compare each run statistic with 3 × the body length of its round. Say that the job `load` checks the ceiling on round 2 of the musl leg and reports round 1 only (ADR-0222).
+  - Red test: none, because this task writes a document. Check: `python -I tools/ste-lint/ste-lint.py docs/architecture/reliability.md` gives 0 hard violations.
+- [ ] 4.2 (CHANGELOG.md) [mechanical] Add one line for the value leg of the load job under "Unreleased".
+  - Red test: none, because this task writes a document. Check: `python -I tools/ste-lint/ste-lint.py CHANGELOG.md` gives 0 hard violations.
+- [ ] 4.3 (openspec) [mechanical] Run the full gates.
+  - Red test: none, because this task runs the gates. Check: `openspec validate value-body-memory-load --strict` passes, and the ste-lint command of `CLAUDE.md` gives 0 hard violations.

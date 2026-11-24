@@ -330,6 +330,14 @@ mod unresolved_type_tests {
 #[cfg(test)]
 mod largest_form_tests;
 
+/// The helpers of the value leg tests: the form body, its digest, and the field lines.
+#[cfg(test)]
+mod value_leg_kit;
+
+/// Tests of the two bodies of the value leg of the load job (design `value-body-memory-load` D6).
+#[cfg(test)]
+mod value_leg_tests;
+
 /// Tests of the memory of the largest edit page after ADR-0223 (change `parameter-page-memory`).
 #[cfg(test)]
 mod largest_measure_tests;
