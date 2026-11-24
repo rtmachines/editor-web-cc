@@ -28,10 +28,10 @@ _spec.loader.exec_module(_memory)
 
 
 ARRAY_LEVELS = 32
-WIDE_LEVELS = 14
+WIDE_LEVELS = 12
 NARROW_LEVELS = ARRAY_LEVELS - WIDE_LEVELS
 TYPE_TEXT = "ARRAY[10..11] OF " * WIDE_LEVELS + "ARRAY[10..10] OF " * NARROW_LEVELS + "LDT"
-PADDING = 4_600_000
+PADDING = 13_710_000
 ALIAS_PREFIX = "LDATE_AND_TIME#"
 MIN_TEXT = ALIAS_PREFIX + "1970-01-01-00:00:00.000000001"
 MAX_TEXT = ALIAS_PREFIX + "2262-04-11-23:47:16.854775807"
@@ -600,11 +600,16 @@ def answer_summary(label, answer):
 
 
 def reading_summary(label, reading):
+    killed = reading["OOMKilled"]
+    killed = str(killed).lower() if killed is not None else None
     return [
         f"{label} container ID: {display(reading['container_id'])}",
         f"{label} memory.peak={display(reading['peak'])} bytes",
         f"{label} memory.current={display(reading['current'])} bytes",
         f"{label} anon={display(reading['anon'])} bytes",
+        (f"{label} oom={display(reading['oom'])} oom_kill={display(reading['oom_kill'])} "
+         f"max={display(reading['max'])} OOMKilled={display(killed)} "
+         f"RestartCount={display(reading['RestartCount'])}"),
     ]
 
 
@@ -620,14 +625,6 @@ def round_summary(result, baseline, reading):
          f"(upper bound, 3 × body length: {display(triple)} bytes)"),
         f"{label} smallest MemAvailable: {display(result['mem_available_min_kib'])} KiB",
     ])
-    if reading:
-        killed = reading["OOMKilled"]
-        killed = str(killed).lower() if killed is not None else None
-        lines.append(
-            f"{label} oom={display(reading['oom'])} oom_kill={display(reading['oom_kill'])} "
-            f"max={display(reading['max'])} OOMKilled={display(killed)} "
-            f"RestartCount={display(reading['RestartCount'])}"
-        )
     return lines
 
 

@@ -231,8 +231,8 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0219](0219-clock-rule-of-backup-health.md) | Clock rule of `backup-health` | Accepted. Amends ADR-0066 (d) and `reliability.md` §7.7, §7.11 | 2026-11-22 |
 | [0220](0220-origin-check-of-a-dev-build-on-plain-http.md) | Origin check of a dev build on plain HTTP | Accepted. Amends ADR-0035 (e) | 2026-11-22 |
 | [0221](0221-zero-tail-after-a-record-length-of-0.md) | Zero tail after a record length of 0 | Accepted. Amends ADR-0217 (b) step 5 and `reliability.md` §7.7, and adds the item of a short file and a known limit | 2026-11-22 |
-| [0222](0222-memory-of-the-value-bodies-under-load.md) | Memory of the value bodies under load | Accepted. Amends ADR-0128 (j), (k), (y), (z), (aa), (ac) and ADR-0211 (p) | 2026-11-22 |
-| [0223](0223-memory-of-the-grid-answers.md) | Memory of the grid answers | Accepted. Amends ADR-0039 (k), ADR-0045 (b) and ADR-0138 (c) | 2026-11-22 |
+| [0222](0222-memory-of-the-value-bodies-under-load.md) | Memory of the value bodies under load | Accepted. Amends ADR-0128 (j), (k), (y), (z), (aa), (ac), ADR-0211 (p), and ADR-0223 (v) and (w) | 2026-11-22 |
+| [0223](0223-memory-of-the-grid-answers.md) | Memory of the grid answers | Accepted. Amends ADR-0039 (k), ADR-0045 (b) and ADR-0138 (c). Amended by ADR-0222 (items (v) and (w): round 1 uses the 4 096-leaf body of `value-body-memory-load` D9) | 2026-11-22 |
 | [0224](0224-mimalloc-on-the-musl-build.md) | `mimalloc` as the global allocator of the musl build | Accepted. Amends the context and the risk of the allocator of ADR-0064. Amends item (z) of ADR-0070 (the unwind proof with `mimalloc`) | 2026-11-25 |
 
 ## Decision map

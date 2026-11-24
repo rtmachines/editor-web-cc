@@ -10,6 +10,11 @@ Marks: `[opus]` is an ADR text (Opus). `[mechanical]` is a Haiku task. `[deploy]
 - Tasks 2.6 to 2.9 change other files of `deploy/ci/` and `.github/workflows/ci.yml`.
 - Tasks 2.3 to 2.10 use the names of the section "Interfaces" of `design.md`.
 - Run tasks 2.3 to 2.10 one after the other, because `deploy/ci/check.sh` runs every `deploy/ci/test_*.py`.
+- Group 2A comes after group 2 and before group 3. The owner decided it after CI run 45444532064 on 2026-11-24 (`design.md` D9).
+- Task 2A.1 comes before tasks 2A.2 and 2A.3. Task 2A.2 needs the JSON pins of task 2A.1.
+- Task 2A.3 copies the reports of tasks 2A.1 and 2A.2 into `design.md` and ADR-0222. Task 2A.4 needs those pins in `design.md` D6, so it comes after task 2A.3.
+- Tasks 2A.4 and 2A.6 change `deploy/ci/load_value.py` and `deploy/ci/test_load_value.py`. Task 2A.5 changes `deploy/ci/load.sh` and `deploy/ci/test_load_sh.py`.
+- Run tasks 2A.4, 2A.5, and 2A.6 one after the other, because `deploy/ci/check.sh` runs every `deploy/ci/test_*.py`. Task 2A.5 can run at the same time as tasks 2A.1 to 2A.3.
 - Group 3 pushes the branch and dispatches CI. Each push needs the approval of the owner.
 - The owner decided the gate of round 1 on 2026-11-24 (`design.md` D8). Round 1 only reports its peak, and round 2 keeps the gate of the ceiling.
 
@@ -205,6 +210,68 @@ Marks: `[opus]` is an ADR text (Opus). `[mechanical]` is a Haiku task. `[deploy]
   - Then `check` writes `load-value.json` with `passed` equal to `false` and fails.
   - Red test in `deploy/ci/test_load_value.py`: four round 1 answers without a status and no round 2 files. The check must fail and name round 1.
   - The same test requires the peak and the OOM counts of the round 1 reading in the summary (scenario "Round 1 ends without answers").
+  - Check: `python3 -I -B deploy/ci/test_load_value.py` passes.
+
+## 2A. Value shape after CI run 45444532064
+
+The owner decided this group on 2026-11-24 (`design.md` D9). Tasks 2A.1 and 2A.2 are Sonnet tasks. Each task of this group takes at most 2 hours.
+
+- [x] 2A.1 (recipe-web) D6, D9. Change the bodies of the value leg to the shape of D9: 32 array levels, 12 wide levels, and 4 096 leaves.
+  - In `route_tests/largest_form_tests.rs`, give the fixture the number of wide levels as an argument. `indexes`, `leaf_path`, `type_text`, `nested`, and `form_pairs` use it.
+  - `aliased_pairs` of `largest_refused_tests.rs` passes the argument on.
+  - Keep every caller of change A at 14 wide levels. The tests of change A, `largest_edit_form_fits_the_value_limit`, and the pins of change A keep the behavior of `main`.
+  - When a test or a pin of change A must change, stop and report the test and the reason.
+  - The three tests of `route_tests/value_leg_tests.rs` use 12 wide levels. The `nested` value of the round 2 assertion also uses 12.
+  - Add `FULL_FORM_PADDING`, `FULL_FORM_BYTES`, and `FULL_FORM_SHA256` to `value_leg_tests.rs`. The round 1 test and the order test stop using `PADDING`, `BODY_BYTES`, and `BODY_SHA256` of change A.
+  - `FULL_FORM_PADDING` is the multiple of 10 000 that gives the body length nearest to 16 744 448 bytes, the middle of the window of D3.
+  - Set `WRITE_FORM_BYTES` and `WRITE_FORM_SHA256` to the values of the new round 2 body.
+  - `value_leg_write_form` also pins `VALUE_JSON_BYTES` and `VALUE_JSON_SHA256`: the length and the SHA-256 of `serde_json::to_string` of the stored value.
+  - Measure the length of the longest round 1 page and its margin to `ANSWER_LIMIT` (32 MiB). When the page is longer than 32 MiB, stop and report.
+  - Keep the stop rules of task 2.1. Stop on another field line in round 1 and on a body outside the window.
+  - Also stop on a missing line of the limit row and on a test longer than 30 s.
+  - Run each of the three tests alone, as in task 2.1. Report the time of each test from the libtest line `finished in`.
+  - Report the type text, the leaf count, `FULL_FORM_PADDING`, the six pins, the page length, and the margin.
+  - Report whether `largest_edit_form_fits_the_value_limit` and the pins of change A in `largest_form_tests.rs` must change, with the reason.
+  - Red test: set 12 wide levels in `value_leg_tests.rs` and keep the old pins. See the three tests fail on the length. Then set the new pins.
+  - Check: `cargo test -p recipe-web --all-features --locked value_leg_` passes and runs three tests. `cargo test -p recipe-web --all-features --locked largest_` passes.
+  - Check: `RUSTFLAGS="--cfg heap_measure" CARGO_TARGET_DIR=target/heap cargo test -p recipe-web --all-features --locked largest_refused -- --ignored --test-threads=1` passes, because the task changes `aliased_pairs`.
+  - Check: `cargo clippy -p recipe-web --all-targets --all-features -- -D warnings` and `cargo fmt --check` pass.
+- [x] 2A.2 (recipe-db) D6, D9. Add the test `parameter_value_size_accepts_the_round_2_value` to `crates/recipe-db/tests/storage/constraints/parameter.rs`.
+  - Reuse `connection`, `insert_parameter`, and `ParameterRow::valid` of that file and `Draft::create` of `tests/storage/support/fixtures.rs`. Give the row a fixed `parameter_key`.
+  - The test builds the round 2 value from the byte recipe of `design.md` D6, because `recipe-db` does not depend on `recipe-web`.
+  - The value has 12 levels with two elements and 20 levels with one element. Thus it has 4 096 leaves in the order of D6.
+  - Leaf `i` holds the count of its value text as a JSON integer: 9 223 372 036 854 775 000 + (`i` mod 800).
+  - The test asserts `VALUE_JSON_BYTES` and `VALUE_JSON_SHA256` of task 2A.1 on `serde_json::to_string` of the value.
+  - The test writes the value with the statement of `SET_VALUE` (`crates/recipe-db/src/transaction/draft_writes.rs` line 83). It binds the value as JSONB, as `set_value` does.
+  - The test asserts one updated row. It reads `pg_column_size(value)` of the row and reports it.
+  - Stop rule: when PostgreSQL refuses the value, stop and report the error and `SELECT pg_column_size($1::jsonb)` of the value.
+  - The test needs Docker (testcontainers, `reliability.md` §6). The file stays below 800 lines.
+  - Red test: before the JSON pins exist, build the value with 14 wide levels. See the test fail with `CHECK_VIOLATION` on `parameter_value_size`, as in CI run 45444532064. Then set 12 wide levels.
+  - Check: `cargo test -p recipe-db --all-features --locked --test storage parameter_value_size` passes and runs two tests.
+  - Check: `cargo clippy -p recipe-db --all-targets --all-features -- -D warnings` and `cargo fmt --check` pass.
+- [x] 2A.3 (openspec, docs/adr) [mechanical] D6, D9. Copy the values of the reports of tasks 2A.1 and 2A.2 into the documents.
+  - In `design.md` D6 and in ADR-0222 (c), replace each `<task 2A.1>` with its value from task 2A.1.
+  - In `design.md` D9, replace `<task 2A.2>` with the `pg_column_size` of task 2A.2.
+  - Red test: none, because this task writes a document.
+  - Check: `grep -c -E '<task 2A\.[12]>' openspec/changes/value-body-memory-load/design.md docs/adr/0222-*.md` gives 0 for each file.
+  - Check: `openspec validate value-body-memory-load --strict` passes, and `python -I tools/ste-lint/ste-lint.py docs/adr/0222-*.md` gives 0 hard violations.
+- [x] 2A.4 (deploy/ci) [deploy] D6, D9. Change `build_body` of `deploy/ci/load_value.py` to the byte recipe of `design.md` D6.
+  - `WIDE_LEVELS` is 12, so the body has 4 096 leaves. `PADDING` is the value of `FULL_FORM_PADDING` of D6.
+  - In `deploy/ci/test_load_value.py`, set `test_body_pins_match_the_rust_route_tests` and the constants `BODY_BYTES`, `BODY_SHA256`, and `WRITE_SHA256` to the pins of D6.
+  - Red test: change the pins of the test first. See the test fail on the length of both rounds. Then change `build_body`.
+  - Check: `python3 -I -B deploy/ci/test_load_value.py` passes.
+- [x] 2A.5 (deploy/ci) [deploy] D5, D9. In `run_value` of `deploy/ci/load.sh`, take the reading `value-precheck` also after a failed pre-check.
+  - A failed pre-check is a failure in action 1 or 2 of D5: a failed `single`, a failed `read_value_versions precheck`, or a failed `check-precheck`.
+  - After that failure, the leg skips the rest of actions 1 and 2. It takes the reading `value-precheck` and returns the status of the first failure. It does not run `recreate_app`.
+  - Keep the status of the first failure as `value_round` does.
+  - Red test in `deploy/ci/test_load_sh.py`: `test_value_stops_before_recreate_when_the_precheck_fails` requires `load-memory-value-precheck.json`. It still requires no file `recreated`.
+  - A second case lets `single` of round 2 fail. The reading `value-precheck` must exist, and `check-precheck` must not run.
+  - Check: `python3 -I -B deploy/ci/test_load_sh.py` and `bash deploy/ci/check.sh` pass.
+- [x] 2A.6 (deploy/ci) [deploy] D5, D9, Interfaces. In `check` of `deploy/ci/load_value.py`, show the OOM counts and the restart count of each value reading after a stop before round 2.
+  - `reading_summary` writes the container ID, the peak, `memory.current`, and `anon`. After a stop, it also writes `oom`, `oom_kill`, `max`, `OOMKilled`, and `RestartCount`.
+  - This applies to each value reading, also `value-precheck`. `round_summary` already writes these values for `value-round-1`.
+  - `check` adds no failure for these values. `load_memory.py` keeps their gate (D1).
+  - Red test in `deploy/ci/test_load_value.py`: extend `test_precheck_failure_reports_the_available_files`. A `value-precheck` reading with `oom_kill` 1 and `RestartCount` 1 must show both values in the summary.
   - Check: `python3 -I -B deploy/ci/test_load_value.py` passes.
 
 ## 3. Proof on the branch

@@ -31,8 +31,8 @@ class LoadValueTests(unittest.TestCase):
 
     def test_body_pins_match_the_rust_route_tests(self):
         pins = (
-            (1, 16_758_074, "bef1574257ef4baa65a9f61e4b96f981255100359efeedfee6d3a7b1077dd6bd"),
-            (2, 12_158_101, "09ff2cf48f37009deac301ed5eeb2bf975bf2b509a8e18359b24addd95b22dc9"),
+            (1, BODY_BYTES, BODY_SHA256),
+            (2, WRITE_BYTES, WRITE_SHA256),
         )
         for round_number, expected_length, expected_sha256 in pins:
             body = self.module.build_body(round_number, row_version=1, unit_path="U1", ordinal=0)
@@ -42,9 +42,10 @@ class LoadValueTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(body).hexdigest(), expected_sha256)
 
 
-BODY_BYTES = 16_758_074
-BODY_SHA256 = "bef1574257ef4baa65a9f61e4b96f981255100359efeedfee6d3a7b1077dd6bd"
-WRITE_SHA256 = "09ff2cf48f37009deac301ed5eeb2bf975bf2b509a8e18359b24addd95b22dc9"
+BODY_BYTES = 16_743_514
+BODY_SHA256 = "354b1a3e4c5ff56400dc92f6f3ddf84fc104390e3334269d852b3ebae599ccc9"
+WRITE_BYTES = 3_033_541
+WRITE_SHA256 = "631700fb82002bb379b37cc2cc9a7d6d9ef2dd628769e4ac3dd9a517f3076022"
 COOKIE = "__Host-recipe_session=fixture-session"
 TOKEN = "fixture-token"
 REFERENCE_ANON = 4096
@@ -280,13 +281,13 @@ class ValueSenderTests(unittest.TestCase):
         server = self.start_peer(status=303)
         draft = self.drafts[4]
         self.assertEqual(self.run_sender("single", 2, "--reference", "LOAD-V5"), (0, ""))
-        self.assert_requests(server, [draft], 12_158_101, WRITE_SHA256)
+        self.assert_requests(server, [draft], WRITE_BYTES, WRITE_SHA256)
         self.samples.assert_not_called()
         answer = self.read_report("load-value-precheck-2.json")
         self.assertEqual(answer.keys(), ANSWER_KEYS)
         self.assertEqual(
             (answer["round"], answer["reference"], answer["key"], answer["body_bytes"]),
-            (2, "LOAD-V5", draft["key"], 12_158_101),
+            (2, "LOAD-V5", draft["key"], WRITE_BYTES),
         )
         self.assertEqual((answer["status"], answer["location"]),
                          (303, f"/recipes/LOAD-V5/versions/1/parameters/{draft['key']}"))
@@ -298,7 +299,6 @@ class ValueSenderTests(unittest.TestCase):
 
 class ValueCheckerTests(unittest.TestCase):
     ceiling = 402_653_184
-    round2_bytes = 12_158_101
 
     def setUp(self):
         self.state = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -320,7 +320,7 @@ class ValueCheckerTests(unittest.TestCase):
         for phase, versions in (("precheck", [1, 1, 1, 1, 2]), ("1", [1, 1, 1, 1, 2]),
                                 ("2", [2, 2, 2, 2, 2])):
             self.write(f"versions-{phase}", {"row_versions": dict(zip(self.refs, versions))})
-        for number, size in ((1, BODY_BYTES), (2, self.round2_bytes)):
+        for number, size in ((1, BODY_BYTES), (2, WRITE_BYTES)):
             answers = [self.answer(number, index, size) for index in range(4)]
             self.write(f"precheck-{number}", self.answer(number, 4, size))
             self.write(f"answers-{number}", {
@@ -436,16 +436,16 @@ class ValueCheckerTests(unittest.TestCase):
             {"round": 1, "container_id": "c" * 64, "peak": self.ceiling, "body_bytes": BODY_BYTES,
              "run_statistic": 95_663_295.75, "mem_available_min_kib": 10_000},
             {"round": 2, "container_id": "d" * 64, "peak": self.ceiling - 1,
-             "body_bytes": self.round2_bytes, "run_statistic": 95_663_295.5,
+             "body_bytes": WRITE_BYTES, "run_statistic": 95_663_295.5,
              "mem_available_min_kib": 10_000},
         ])
         summary = self.summary.read_text(encoding="utf-8")
         self.assertTrue(summary.startswith("Earlier summary.\n"))
         for value in (str(self.ceiling), "c" * 64, "d" * 64, "20000001", "MemAvailable",
-                      "job elapsed", "leg elapsed", str(BODY_BYTES), str(self.round2_bytes)):
+                      "job elapsed", "leg elapsed", str(BODY_BYTES), str(WRITE_BYTES)):
             self.assertIn(value, summary)
-        self.assertRegex(summary, r"(?m)^.*95663295\.75.*50274222.*$")
-        self.assertRegex(summary, r"(?m)^.*95663295\.5.*36474303.*$")
+        self.assertRegex(summary, rf"(?m)^.*95663295\.75.*{3 * BODY_BYTES}.*$")
+        self.assertRegex(summary, rf"(?m)^.*95663295\.5.*{3 * WRITE_BYTES}.*$")
 
     def test_round_two_at_ceiling_fails(self):
         self.change_reading("round-2", peak=str(self.ceiling))
@@ -490,6 +490,8 @@ class ValueCheckerTests(unittest.TestCase):
         summary = self.summary.read_text(encoding="utf-8")
         for line in ("value-seed memory.peak=", "value-precheck memory.peak=",
                      "value-baseline-1 memory.peak=",
+                     "value-seed oom=0 oom_kill=0 max=0 OOMKilled=false RestartCount=0",
+                     "value-baseline-1 oom=0 oom_kill=0 max=0 OOMKilled=false RestartCount=0",
                      "pre-check round 1 request LOAD-V5 status=422",
                      "pre-check round 2 request LOAD-V5 status=303",
                      "stopped before round 2", "round 1 memory.peak=536870912 bytes",
@@ -501,7 +503,9 @@ class ValueCheckerTests(unittest.TestCase):
 
     def test_precheck_failure_reports_the_available_files(self):
         self.write("precheck-1", self.read("precheck-1") | {"status": 500})
-        for name in ("memory-value-precheck", "memory-value-baseline-1", "memory-value-round-1",
+        self.change_reading("precheck", oom="2", oom_kill="1", max="3", OOMKilled="true",
+                            RestartCount="1")
+        for name in ("memory-value-baseline-1", "memory-value-round-1",
                      "memory-value-baseline-2", "memory-value-round-2", "answers-1", "answers-2",
                      "versions-1", "versions-2"):
             self.path(name).unlink()
@@ -512,6 +516,8 @@ class ValueCheckerTests(unittest.TestCase):
         self.assertEqual(report["rounds"], [])
         summary = self.summary.read_text(encoding="utf-8")
         self.assertIn("value-seed memory.peak=", summary)
+        self.assertIn("value-precheck oom=2 oom_kill=1 max=3 OOMKilled=true RestartCount=1",
+                      summary.splitlines())
         self.assertIn("pre-check round 1 request LOAD-V5 status=500", summary)
         self.assertIn(cause, summary)
 

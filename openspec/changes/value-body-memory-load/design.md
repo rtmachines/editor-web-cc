@@ -16,9 +16,9 @@ This design checks the facts at `origin/main` `66cb8e9`. That commit holds chang
 - The route test `largest_edit_form_fits_the_value_limit` (`crates/recipe-web/src/pages/parameters/route_tests/largest_form_tests.rs:360`) builds a form of 11 617 429 bytes (11.08 MiB). Its type has 32 array levels and 16 384 `LDT` leaves. Each leaf path already has 128 bytes.
 - `form_pairs` of that file (line 116) gives the head pairs in this order: `row_version`, `unit_path`, `tag`, `name_en`, `description_en`, `s7_address`, `ordinal`, `type`, and `value_type`.
 - `call` of `crates/recipe-web/src/test_support.rs` (line 422) reads an answer of at most 1 MiB (`BODY_LIMIT`). A larger answer panics. `call_bounded` (line 429), `get_bounded`, and `post_fields_bounded` read an answer up to a named limit.
-- `refused_pairs` and `refused_body` of `route_tests/largest_refused_tests.rs` (line 46) build the round 1 body of D3. They pin 16 758 074 bytes and the SHA-256 `bef15742...d6bd`.
-- The refused page of round 1 has at most 27 708 942 bytes. This is the pin `REFUSED_PAGE_EN` of `largest_refused_tests.rs` (line 209).
-- ADR-0223 (v) gives a heap sum of 894 398 804 bytes for the four refused forms of round 1. The sum is above `soak.memory_ceiling` (402 653 184 bytes) and above `container.app_memory` (536 870 912 bytes).
+- `refused_pairs` and `refused_body` of `route_tests/largest_refused_tests.rs` (lines 64 and 69) build the refused form of change A with 16 384 leaves. They pin 16 758 074 bytes and the SHA-256 `bef15742...d6bd`. Before D9, this form was the round 1 body of D3.
+- The refused page of that form has at most 27 708 942 bytes. This is the pin `REFUSED_PAGE_EN` of `largest_refused_tests.rs` (line 215).
+- ADR-0223 (v) gives a heap sum of 894 398 804 bytes for four of these refused forms. The sum is above `soak.memory_ceiling` (402 653 184 bytes) and above `container.app_memory` (536 870 912 bytes).
 - `form()` (`test_kit.rs:101`) joins the pairs with `&` and encodes each key and value with `encode()` (`test_helpers.rs:111`). `encode()` keeps only the unreserved characters, so a space is `%20`.
 - `Client.post` of `deploy/ci/load_client.py` adds `csrf_token` to the body and encodes a space as `+`.
 - `resolve_type` takes the class-2 lock of the `ARRAY` key of the machine until the commit (`definition_steps.rs:72`, `data-model.md` §1.4). Two drafts on one machine thus wait for each other, and `db.lock_timeout` is 2 s.
@@ -27,7 +27,9 @@ This design checks the facts at `origin/main` `66cb8e9`. That commit holds chang
 - `http.value_body_permits` is a compiled default (`crates/recipe-web/src/settings.rs:23`). No configuration key of `recipe-server` reads it.
 - The machine platform `CodesysIec` has `LDT` (`domain-model.md` §2) and no S7 address (I5).
 - The Caddyfile has no `request_buffers`, so Caddy streams the request body to `app`.
-- A valid form with `LDT` leaves has at most about 13 206 677 bytes. The alias form has 12 158 101 bytes. The window of D3 starts at 16 711 680 bytes.
+- A valid form with `LDT` leaves has at most about 13 206 677 bytes. The alias form of change A has 12 158 101 bytes. The window of D3 starts at 16 711 680 bytes.
+- `parameter_value_size` (`migrations/0001_schema.sql` line 431) is `CHECK (pg_column_size(value) <= 1048576)`. It bounds the stored JSONB size, not the JSON text.
+- The in-memory store of `recipe-app` has no `parameter_value_size`. A route test can thus save a value that PostgreSQL refuses.
 - `ready` of `prepare.rs` builds the leaf texts (line 148) and the limit list (line 149). Then it refuses the form when a line exists or the limit list fails (lines 150 to 152).
 - The refusal runs `refuse_checked` (lines 117 to 133). It builds the sent grid (line 123) and, after a bad limit row, the lines of the limit rows with that grid (line 124).
 - A save that passes every check builds no grid (ADR-0223 (p), `prepare.rs` line 137).
@@ -88,9 +90,10 @@ This design checks the facts at `origin/main` `66cb8e9`. That commit holds chang
 
 - Each round sends four bodies in parallel to `POST /recipes/{reference}/versions/1/parameters/{key}/definition`. D6 defines the two bodies.
 - The round 2 body is the write form. It is the edit form of the fixture of D6, and every `LDT` text has the alias prefix `LDATE_AND_TIME#` of ADR-0205. Its bounds are the fixture bounds of D6.
+- Both bodies use the value shape of D9: 32 array levels and 4 096 leaves. Thus `parameter_value_size` accepts the round 2 value.
 - The round 1 body is the write form with an over-long `description_en`. The server refuses only `description_en`. The encoded length of the round 1 body lies in the window from 16 MiB − 64 KiB to 16 MiB.
 - The round 1 body makes the server read the whole body, build the pairs, and build the leaf texts and the limit list. These are the three buffers of ADR-0211 (p). Only then does `prepare` refuse it with `422` (`prepare.rs` lines 148 to 152).
-- The refusal of a round 1 body builds the sent grid and renders the refused page. The page has 32 mode rows and 16 384 leaf rows (ADR-0223 (a), (k)).
+- The refusal of a round 1 body builds the sent grid and renders the refused page. The page has 32 mode rows and 4 096 leaf rows (ADR-0223 (a), (k)).
 - A round 2 body passes every check of `prepare`, so it builds no grid (ADR-0223 (p)). Its answer `303` renders no page. Thus the peak of round 2 holds no row model and no HTML of a grid.
 - The parse of the `LDT` texts in `stage_definition` happens only in round 2.
 - The round 1 request writes nothing. Task 2.1 proves both facts with tests.
@@ -135,13 +138,15 @@ This design checks the facts at `origin/main` `66cb8e9`. That commit holds chang
 - The sender writes the pinned bytes directly. It sends the token in the header `X-CSRF-Token` with a matching `Origin` header, not in the body.
 - A new step `value` runs after the flood. It does these actions in this order:
   1. It sends the round 1 body and then the round 2 body to `LOAD-V5` in the single-request mode, and records both durations.
-  2. It reads the `row_version` of `LOAD-V5` from the database and runs the check of the pre-check. A failure stops the leg before `recreate_app`.
-  3. It takes the reading `value-precheck`, runs `recreate_app`, and takes the reading `value-baseline-1`.
+  2. It reads the `row_version` of `LOAD-V5` from the database and runs the check of the pre-check.
+  3. It takes the reading `value-precheck`, also after a failed pre-check. After a failed pre-check, the leg stops here. Else it runs `recreate_app` and takes the reading `value-baseline-1`.
   4. It runs round 1 with the client of D4 and takes the reading `value-round-1`.
   5. It reads the `row_version` of each draft from the database and runs the check of round 1. A failure ends the leg before round 2.
   6. It runs `recreate_app` and takes the reading `value-baseline-2`.
   7. It runs round 2 with the client of D4 and takes the reading `value-round-2`.
   8. It reads the `row_version` of each draft from the database again.
+- A failed pre-check is a failure in action 1 or 2: a failed `single`, a failed read of the `row_version`, or a failed check. The leg then skips the rest of actions 1 and 2.
+- After a failed pre-check, the leg returns the status of the first failure, as `value_round` does after a failed round (owner, 2026-11-24, D9).
 - The check of the pre-check requires `422` with the first field line `E-WEB-008` under `description_en`. Then it requires `303` with the exact `Location` of `LOAD-V5` and a larger `row_version`.
 - The check of round 1 requires four answers `422`, each with the first field line `E-WEB-008` under `description_en`. It also requires the `row_version` of the state file for `LOAD-V1` to `LOAD-V4` and the `row_version` of the pre-check for `LOAD-V5`.
 - Only the round 1 requests and the round 1 body of the pre-check render a grid answer. The round 2 saves build no grid (D3, ADR-0223 (p)). Thus the reading `value-round-2` holds no grid answer.
@@ -149,6 +154,7 @@ This design checks the facts at `origin/main` `66cb8e9`. That commit holds chang
 - A new step `value-check` runs the checker of `deploy/ci/load_value.py`. It writes `load-value.json` and the lines of the job summary.
 - The steps `value`, the memory check, `value-check`, and "Require the values from each leg" have the condition `${{ !cancelled() && steps.seed.outcome == 'success' }}`. Thus `value-check` also runs after a failed `value`.
 - When round 2 did not run, `check` writes the lines of each reading and each answers file that exists. It also writes the OOM counts of round 1 and the cause of the stop. Then it fails.
+- After a stop, the line of each value reading also holds its OOM counts and its restart count, also for `value-precheck` (D9).
 - The upload step keeps its condition. After a stop in round 1, the summary thus holds the round 1 reading, but the job has no artifact.
 - The summary records the elapsed time of the leg, the elapsed time of the job, and the smallest `MemAvailable` of each round.
 - The step "Check the runner before the stack" also writes the start time of the job to `$RUNNER_TEMP/load-job-start`. This keeps the step order of ADR-0128 (j).
@@ -160,8 +166,8 @@ This design checks the facts at `origin/main` `66cb8e9`. That commit holds chang
 ### D6. Two bodies in two generators
 
 - New route tests in `crates/recipe-web/src/pages/parameters/route_tests/` build the two bodies of D3. The old test `largest_edit_form_fits_the_value_limit` stays.
-- The tests use the test support of change A: `post_fields_bounded` of `crates/recipe-web/src/test_support.rs` and the fixture of `largest_form_tests.rs`.
-- The limit of an answer is `ANSWER_LIMIT`, 32 MiB (33 554 432 bytes). The pin `REFUSED_PAGE_EN` gives the longest round 1 page: 27 708 942 bytes. The margin is 5 845 490 bytes.
+- The tests use the test support of change A: `post_fields_bounded` of `crates/recipe-web/src/test_support.rs` and the fixture of `largest_form_tests.rs`. The fixture takes the number of wide levels as an argument (D9).
+- The limit of an answer is `ANSWER_LIMIT`, 32 MiB (33 554 432 bytes). Task 2A.1 measures the longest round 1 page: `19 478 174` bytes. The margin is `14 076 258` bytes.
 - The round 1 test reads its answer with `post_fields_bounded`. It proves `422`, a list of field lines equal to the one line `E-WEB-008` under `description_en`, and no write.
 - The round 1 test pins the length and the SHA-256 of the body.
 - The order test sends the round 1 body with one bad `max_length` text in one limit row. Its `description_en` is shorter by the length of the extra pair, so the body stays at or below 16 MiB.
@@ -171,6 +177,7 @@ This design checks the facts at `origin/main` `66cb8e9`. That commit holds chang
 - `length_line` then keeps the sent id `limits-0-max_length` (ADR-0223 (g)). The line stands only in the summary, with the link `href="#limits-0-max_length"`. The test `limit_line_of_a_maximum_length_on_a_row_without_that_input_keeps_its_sent_id` pins this rule.
 - No value field can give a line in `leaf_texts`, because the reader refuses each bad value key first. Thus no test line proves the place of `leaf_texts`. ADR-0222 (c) records this as a known limit (owner, 2026-11-22).
 - The round 2 test proves `303` with the exact `Location` on the in-memory store. It pins the length and the SHA-256 of the body.
+- The round 2 test also pins the length and the SHA-256 of the compact JSON text of the stored value. The `recipe-db` test of D9 pins the same two values.
 - The three route tests have no `#[ignore]` (owner, 2026-11-24). They pin a length and a SHA-256, so the normal test run must catch a change.
 - The port of task 2.1 runs each test alone in the library tests, with its exact name. The time of a test is the value of the libtest line `finished in`, in a run that reports one passed test.
 - When one test takes more than 30 s, the agent stops and reports it to the owner.
@@ -181,7 +188,7 @@ This design checks the facts at `origin/main` `66cb8e9`. That commit holds chang
 
 #### Byte recipe
 
-Task 2.2 copied this list from the report of task 2.1 on 2026-11-24.
+Task 2.2 copied this list from the report of task 2.1 on 2026-11-24. The shape of D9 changed the list on 2026-11-24. Task 2A.3 copies the values of task 2A.1 into it.
 
 - The ordered head pairs, with the value of each pair. The base is `form_pairs()` of `route_tests/largest_form_tests.rs`.
   - `row_version=1`
@@ -191,25 +198,28 @@ Task 2.2 copied this list from the report of task 2.1 on 2026-11-24.
   - `description_en`: the padding of round 1 (see the padding item below), or `The largest edit form` in round 2.
   - `s7_address=` (empty)
   - `ordinal=0`
-  - Then `type` and `value_type`, in this order. Both hold the type text: 14 times `ARRAY[10..11] OF `, 18 times `ARRAY[10..10] OF `, and `LDT`.
+  - Then `type` and `value_type`, in this order. Both hold the type text: 12 times `ARRAY[10..11] OF `, 20 times `ARRAY[10..10] OF `, and `LDT`.
 - The fixture bounds:
   - 32 array levels.
-  - 16 384 leaves (2^14), numbered 0 to 16 383.
+  - 4 096 leaves (2^12), numbered 0 to 4 095.
   - Each leaf path has 128 bytes: 32 segments of 4 bytes.
 - The order of the leaves and of the pairs of one leaf:
-  - The leaves appear in ascending order, from leaf 0 to leaf 16 383.
+  - The leaves appear in ascending order, from leaf 0 to leaf 4 095.
   - The pairs of leaf `i` appear in this order: `value{path}`, `limits[i].leaf_path`, `limits[i].min`, `limits[i].max`.
-  - The path of leaf `i` writes `i` as 14 binary digits, most significant first. Level `l` below 14 gets `[11]` when digit `l` is 1, else `[10]`. Levels 14 to 31 get `[10]`.
+  - The path of leaf `i` writes `i` as 12 binary digits, most significant first. Level `l` below 12 gets `[11]` when digit `l` is 1, else `[10]`. Levels 12 to 31 get `[10]`.
 - The value text, the minimum text, and the maximum text of each leaf:
   - The value text of leaf `i` is `LDT#2262-04-11-23:47:16.854775`, followed by `i mod 800` with three digits (`value_text`).
   - The minimum text is `LDT#1970-01-01-00:00:00.000000001`.
   - The maximum text is `LDT#2262-04-11-23:47:16.854775807`.
   - The alias of `aliased_pairs` in `largest_refused_tests.rs` replaces the first `LDT#` of each text with `LDATE_AND_TIME#`. Each replacement adds 11 bytes.
 - The padding of `description_en` in the round 1 body:
-  - The padding character is `x`. Its length is 4 600 000 characters (`PADDING`).
+  - The padding character is `x`. Its length is `13 710 000` characters (`FULL_FORM_PADDING` of `value_leg_tests.rs`).
+  - `FULL_FORM_PADDING` is the multiple of 10 000 that gives the body length nearest to 16 744 448 bytes, the middle of the window of D3.
   - The order body is the round 1 body with the `x` count shorter by `form(&[BAD_LENGTH_PAIR]).len() + 1`. The pair `limits[0].max_length=x` comes last.
-- `FULL_FORM_BYTES` is 16 758 074. `FULL_FORM_SHA256` is `bef1574257ef4baa65a9f61e4b96f981255100359efeedfee6d3a7b1077dd6bd`. The code names these pins `BODY_BYTES` and `BODY_SHA256` in `largest_refused_tests.rs`.
-- `WRITE_FORM_BYTES` is 12 158 101. `WRITE_FORM_SHA256` is `09ff2cf48f37009deac301ed5eeb2bf975bf2b509a8e18359b24addd95b22dc9`. The code names these pins in `value_leg_tests.rs`.
+- `FULL_FORM_BYTES` is `16 743 514`. `FULL_FORM_SHA256` is `354b1a3e4c5ff56400dc92f6f3ddf84fc104390e3334269d852b3ebae599ccc9`. The code names these pins in `value_leg_tests.rs`.
+- `WRITE_FORM_BYTES` is `3 033 541`. `WRITE_FORM_SHA256` is `631700fb82002bb379b37cc2cc9a7d6d9ef2dd628769e4ac3dd9a517f3076022`. The code names these pins in `value_leg_tests.rs`.
+- `VALUE_JSON_BYTES` is `253 949`. `VALUE_JSON_SHA256` is `3f6aacb71efb84742bbb8fc0ccdc435e9869550da22c89f1b74fec934d3d3527`. They pin `serde_json::to_string` of the stored round 2 value.
+- The form of change A keeps 14 wide levels, 16 384 leaves, `PADDING` (4 600 000), `BODY_BYTES`, and `BODY_SHA256` of `largest_refused_tests.rs`.
 
 ### D7. The measured value
 
@@ -235,9 +245,40 @@ Change A measured the refused page of round 1. ADR-0223 (v) gives a heap sum of 
 - On 2026-11-24 the owner kept `continue-on-error` on the step `value-check` of the `cc-debian13` leg, as in ADR-0128 (i). Tasks 3.1 and 3.8 read `failures` of that leg by hand.
 - On 2026-11-24 the owner decided that a stop in round 1 gives no artifact. The job summary holds the result of round 1 (task 2.10).
 
+### D9. The value shape after CI run 45444532064 (owner, 2026-11-24)
+
+The first dispatch run of the branch failed in the pre-check of both legs.
+
+- musl: the round 2 body to `LOAD-V5` got `409 E-DB-003`. PostgreSQL logged a violation of `parameter_value_size`.
+- The round 2 value of 16 384 leaves has about 0.94 MiB of JSON text. A model of the JSONB format gives about 2.7 MiB. This value is an estimate, not a measurement.
+- The route tests passed, because the in-memory store of `recipe-app` has no `parameter_value_size`.
+- `cc-debian13`: the app restarted inside the round 2 transaction of the pre-check. The cause is unproven, and an OOM kill is likely.
+- No memory reading of the pre-check exists, because `run_value` stopped before the reading `value-precheck`.
+
+The decisions:
+
+- Both bodies keep 32 array levels. 12 levels are `ARRAY[10..11] OF`, and 20 levels are `ARRAY[10..10] OF`. The value thus has 4 096 leaves (2^12).
+- Round 1 keeps the window of D3. The padding of `description_en` grows and fills the window.
+- The fixture of `largest_form_tests.rs` takes the number of wide levels as an argument. The tests of change A keep 14 wide levels, their pins, and the behavior of `main`.
+- New pins replace the pins of D6. Task 2A.1 measures them. Task 2A.3 copies them into D6 and ADR-0222 (c).
+- A new `recipe-db` test writes the round 2 value into PostgreSQL with the statement of the adapter. It proves that `parameter_value_size` accepts the value.
+- The `recipe-db` test measures `pg_column_size` of the round 2 value: `26 964` bytes. It needs Docker (`reliability.md` §6).
+- The leg takes the reading `value-precheck` also after a failed pre-check, as `value_round` does after a failed round. This changes actions 2 and 3 of D5.
+- After a stop, the summary shows the OOM counts and the restart count of each value reading. A stop gives no artifact, so only the summary holds these values.
+- The owner chose option (a) of the diagnosis. Rejected: (b) 16 384 leaves with fewer array levels.
+- Rejected: (c) a larger `parameter_value_size` through a migration and an ADR. The proposal puts a change of a limit out of scope.
+- The heap sum of ADR-0223 (v) describes the old round 1 body of 16 384 leaves. The sum of the rejected smaller round 1 of D8 also uses the old fixture. No measured heap sum exists for the new round 1 body.
+
+#### Deferred to change B
+
+- The app does not refuse a value before the database when its JSONB is larger than `parameter_value_size`. PostgreSQL then refuses the save with `409 E-DB-003`.
+- Change A assumed that PostgreSQL can store the largest valid parameter. The value of 16 384 leaves of change A passes the route tests, but PostgreSQL refused it in CI run 45444532064.
+- The round 2 gate of this change thus covers the largest value of the fixture of D9 that PostgreSQL stores. It does not cover the largest form that the app accepts.
+- This change does not fix the finding.
+
 ## Interfaces
 
-Tasks 2.3 to 2.9 use these names. Each file is in `$CI_STATE` and holds one JSON object.
+Tasks 2.3 to 2.9 and tasks 2A.4 to 2A.6 use these names. Each file is in `$CI_STATE` and holds one JSON object.
 
 ### Commands
 
@@ -291,6 +332,7 @@ Tasks 2.3 to 2.9 use these names. Each file is in `$CI_STATE` and holds one JSON
 - `load-memory-<PHASE>.json`. Writer: `read_memory` of `load.sh`. `PHASE` is `timings`, `flood`, or one of the six value phases of D1.
 - Keys: `container_id`, `peak`, `current`, `anon`, `file`, `limit`, `oom_kill`, `oom`, `max`, `OOMKilled`, and `RestartCount`.
 - Each value is a string. `container_id` has 64 lowercase hexadecimal digits. `OOMKilled` is `true` or `false`. Each other value is decimal digits. Each value can also be `unavailable`.
+- After a failed pre-check, `load-memory-value-precheck.json` exists, and no later value reading exists (D5).
 
 ### Results
 
@@ -312,10 +354,11 @@ Tasks 2.3 to 2.9 use these names. Each file is in `$CI_STATE` and holds one JSON
 - [The new steps extend a job of 60 minutes.] → Each step has a timeout. The summary records the elapsed time of the job. Task 3.1 checks a reserve of at least 5 minutes.
 - [Four large answers use the memory of the runner.] → The client records the smallest `MemAvailable` of each round.
 - [The round 2 peak reaches 384 MiB.] → The job fails. The orchestrator stops and asks the owner. No task changes a limit.
-- [Round 1 needs about 894 MB by the heap sum of ADR-0223 (v).] → The round 1 reading only reports (D8). The sum assumes that the four renders overlap fully, so the real peak may be lower.
+- [The old round 1 body needs about 894 MB by the heap sum of ADR-0223 (v).] → The round 1 reading only reports (D8). The sum assumes that the four renders overlap fully, so the real peak may be lower.
 - [An OOM kill in round 1 can end the leg before round 2.] → Then the answers of round 1 fail. The summary still shows the round 1 reading. The orchestrator stops and asks the owner, because round 2 then gives no proof.
 - [Mutation B can add copies to the round 1 bodies.] → The mutation copies only a body below the window of D3. Round 1 thus gets no copies (D8).
-- [One valid save has a large request peak in a route test.] → ADR-0223 gives 345 978 140 bytes. That peak includes the copy of the in-memory store. Round 2 may also reach the ceiling. The reading `value-round-2` shows it.
+- [The in-memory store has no `parameter_value_size`.] → A route test can pass with a value that PostgreSQL refuses. The `recipe-db` test of D9 writes the round 2 value into PostgreSQL.
+- [One valid save has a large request peak in a route test.] → ADR-0223 gives 345 978 140 bytes for the old value. That peak includes the copy of the in-memory store. Round 2 may also reach the ceiling. The reading `value-round-2` shows it.
 
 ## Migration Plan
 
@@ -323,4 +366,6 @@ No migration. The change adds CI steps and documents only.
 
 ## Open Questions
 
-None. The owner decided D1, D2, D3, and the two rounds of D3 on 2026-11-22. After the second plan review, the owner decided one container for each round and the known limit of `leaf_texts` (2026-11-22). The owner decided D8 and the test runs of D6 on 2026-11-24.
+The owner decided D1, D2, D3, and the two rounds of D3 on 2026-11-22. After the second plan review, the owner decided one container for each round and the known limit of `leaf_texts` (2026-11-22). The owner decided D8 and the test runs of D6 on 2026-11-24. The owner decided D9 on 2026-11-24.
+
+The owner kept D8 on 2026-11-24, and change B decides the gate of round 1 from its measured peak with the D9 body.

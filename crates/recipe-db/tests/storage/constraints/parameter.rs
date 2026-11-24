@@ -383,6 +383,77 @@ async fn parameter_value_size_rejects_a_value_above_1_mib() {
     assert_constraint(result, CHECK_VIOLATION, "parameter_value_size");
 }
 
+/// The statement of `SET_VALUE` in `draft_writes.rs`. The test writes the value like `set_value`.
+const SET_VALUE: &str =
+    "UPDATE parameter SET value = $3 WHERE recipe_version_id = $1 AND parameter_key = $2";
+/// The number of array levels of the round 2 value (`design.md` D6).
+const VALUE_LEVELS: usize = 32;
+/// The number of outer levels with two elements.
+const WIDE_LEVELS: usize = 12;
+/// The length of the compact JSON text of the round 2 value, as task 2A.1 pins it.
+const VALUE_JSON_BYTES: usize = 253_949;
+/// The SHA-256 of the compact JSON text of the round 2 value, as task 2A.1 pins it.
+const VALUE_JSON_SHA256: &str = "3f6aacb71efb84742bbb8fc0ccdc435e9869550da22c89f1b74fec934d3d3527";
+/// The size limit of `parameter_value_size` in bytes.
+const VALUE_SIZE_LIMIT: i32 = 1_048_576;
+/// The count of leaf 0. Leaf `i` adds `i` modulo 800, so the highest count is below `i64::MAX`.
+const LEAF_COUNT_BASE: i64 = 9_223_372_036_854_775_000;
+
+/// Return the nested JSON of the round 2 value from the level `level`.
+fn round_2_value(level: usize, next: &mut usize) -> serde_json::Value {
+    if level == VALUE_LEVELS {
+        let offset = i64::try_from(*next % 800).unwrap();
+        *next = next.checked_add(1).unwrap();
+        let count = LEAF_COUNT_BASE.checked_add(offset).unwrap();
+        return serde_json::json!(count);
+    }
+    let elements = if level < WIDE_LEVELS { 2 } else { 1 };
+    serde_json::Value::Array(
+        (0..elements)
+            .map(|_| round_2_value(level.checked_add(1).unwrap(), next))
+            .collect(),
+    )
+}
+
+#[tokio::test]
+async fn parameter_value_size_accepts_the_round_2_value() {
+    let mut conn = connection().await;
+    let draft = Draft::create(&mut conn).await;
+    let key = Uuid::from_u128(0x7357_0007_0000_0000_0000_0000_0a2a_0002);
+    let row = ParameterRow {
+        parameter_key: Some(key),
+        ..ParameterRow::valid()
+    };
+    insert_parameter(&mut conn, &draft, &row).await.unwrap();
+    let value = round_2_value(0, &mut 0);
+    let text = serde_json::to_string(&value).unwrap();
+    // `recipe-db` has no `sha2` crate, so PostgreSQL computes the digest of the text.
+    let digest: String = sqlx::query_scalar("SELECT encode(sha256(convert_to($1, 'UTF8')), 'hex')")
+        .bind(&text)
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(text.len(), VALUE_JSON_BYTES);
+    assert_eq!(digest, VALUE_JSON_SHA256);
+
+    let updated = sqlx::query(SET_VALUE)
+        .bind(draft.version)
+        .bind(key)
+        .bind(&value)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+    assert_eq!(updated.rows_affected(), 1);
+    let stored_size: i32 =
+        sqlx::query_scalar("SELECT pg_column_size(value) FROM parameter WHERE parameter_key = $1")
+            .bind(key)
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+    assert!(stored_size <= VALUE_SIZE_LIMIT);
+}
+
 // ---- parameter_limit ----
 
 /// The columns of one `parameter_limit` row. A bound is a decimal text, or NULL.

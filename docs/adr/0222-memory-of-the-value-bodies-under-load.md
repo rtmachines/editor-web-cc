@@ -1,6 +1,6 @@
 # ADR-0222: Memory of the value bodies under load
 
-Status: Accepted. Amends ADR-0128 (j), (k), (y), (z), (aa), (ac) and ADR-0211 (p)
+Status: Accepted. Amends ADR-0128 (j), (k), (y), (z), (aa), (ac), ADR-0211 (p), and ADR-0223 (v) and (w)
 Date: 2026-11-22
 Deciders: project owner
 
@@ -16,6 +16,7 @@ These facts limit the test:
 
 - `memory.peak` is the high-water mark of the cgroup since the start of the container. It includes the file cache. It is the only peak value of cgroup v2.
 - A valid form with `LDT` leaves has at most about 13 206 677 bytes. Thus a valid `LDT` write form stays below the round 1 window of item (c).
+- `parameter_value_size` of `migrations/0001_schema.sql` bounds `pg_column_size(value)` to 1 048 576 bytes. The in-memory store of `recipe-app` has no such check.
 - `ready` of `crates/recipe-web/src/pages/parameters/prepare.rs` builds the leaf texts (line 148) and the limit list (line 149). Then it refuses the form when a field line exists or the limit list fails (lines 150 to 152).
 - A save that passes every check builds no grid (ADR-0223 (p)). Thus only a refused round 1 body renders a grid answer.
 - `http.value_body_permits` is the compiled default `DEFAULT_VALUE_BODY_PERMITS` of `crates/recipe-web/src/settings.rs`. No configuration key of `recipe-server` reads it.
@@ -80,6 +81,7 @@ Ceiling and metric:
     - The exception: a value of the round 1 reading that is `unavailable` or not a number still fails both legs.
     - Round 1 keeps its answer, `row_version`, and overlap checks. An OOM kill that ends a round 1 request thus fails the answer check, and the value leg ends before round 2.
     - Change B of ADR-0223 (w) turns the gate of round 1 on again.
+    - The owner kept this rule on 2026-11-24. Change B decides the gate of round 1 from its measured peak with the body of item (c).
   - As in ADR-0128 (i), these bounds gate the leg `musl` only. The leg `cc-debian13` reports them with `continue-on-error`.
   - A missing or invalid value fails both legs in the step "Require the values from each leg".
   - This item amends ADR-0128 (z) for the round 1 reading and ADR-0128 (ac) for the value leg. For the flood, ADR-0128 (z) and (ac) stay.
@@ -98,6 +100,13 @@ Rounds and the proof of the overlap:
   - Then `prepare` refuses the round 1 body with `422` and the first field line `E-WEB-008` under `description_en`. The request writes nothing.
   - A round 1 body has no unknown, repeated, or malformed key. Such a key gives one line of the field `form` and stops the reader before the texts (ADR-0138).
   - A round 2 body is the write form. Each `LDT` text has the alias prefix `LDATE_AND_TIME#` of ADR-0205.
+  - Both bodies use a type of 32 array levels: 12 levels `ARRAY[10..11] OF` and 20 levels `ARRAY[10..10] OF`. The value thus has 4 096 leaves (owner, 2026-11-24).
+    - The reason: in the first dispatch run, PostgreSQL refused a round 2 value of 16 384 leaves with `parameter_value_size`. The answer was `409 E-DB-003`.
+    - A round 1 body has `16 743 514` bytes and the SHA-256 `354b1a3e4c5ff56400dc92f6f3ddf84fc104390e3334269d852b3ebae599ccc9`.
+    - A round 2 body has `3 033 541` bytes and the SHA-256 `631700fb82002bb379b37cc2cc9a7d6d9ef2dd628769e4ac3dd9a517f3076022`.
+    - A `recipe-db` test writes the round 2 value into PostgreSQL. It proves that `parameter_value_size` accepts the value.
+    - Item (a), Option F, and the risk of an OOM kill in round 1 name heap sums of ADR-0223. These sums describe the old round 1 body of 16 384 leaves.
+    - This item thus amends ADR-0223 (v) and (w), because round 1 now uses the body of 4 096 leaves.
   - A round 2 request gets `303` with the `Location` of the parameter page of its key. The `row_version` of its draft increases.
   - The command parses the `LDT` texts in `stage_definition` only in round 2.
   - The client of a round holds back the last byte of each body until a barrier. The four requests share one deadline of 8 s, below `http.body_read_timeout`.
@@ -133,13 +142,13 @@ Order of the steps:
   - The step `value` runs these actions in this order:
     1. It sends a round 1 body and then a round 2 body to the fifth draft, one request at a time.
     2. It requires `422` with the first field line `E-WEB-008` under `description_en`. Then it requires `303` with the exact `Location` and a larger `row_version`.
-    3. It takes the reading `value-precheck`, runs `recreate_app`, and takes the reading `value-baseline-1`.
+    3. It takes the reading `value-precheck`, also after a failed pre-check. After a failed pre-check, the value leg stops here. Else it runs `recreate_app` and takes the reading `value-baseline-1`.
     4. It runs round 1 and takes the reading `value-round-1`.
     5. It requires four answers `422` under `description_en` and an unchanged `row_version` of each draft.
     6. It runs `recreate_app` and takes the reading `value-baseline-2`.
     7. It runs round 2 and takes the reading `value-round-2`.
     8. It reads the `row_version` of each draft from the database again.
-  - A failure of the pre-check stops the value leg before its first `recreate_app`. A failure of round 1 ends the value leg before round 2. The value leg still takes the round 1 reading.
+  - A failure in action 1 or 2 is a failure of the pre-check. It stops the value leg after the reading `value-precheck` and before its first `recreate_app` (owner, 2026-11-24). A failure of round 1 ends the value leg before round 2. The value leg still takes the round 1 reading.
   - The steps `value` and `value-check` have `continue-on-error` in the leg `cc-debian13`, like the flood (ADR-0128 (i)). The step `value-seed` has none. Each new step has `timeout-minutes`.
 
 Readings and the peak of the whole run:
@@ -156,6 +165,7 @@ Readings and the peak of the whole run:
   - The peak of the whole run is the largest of the eight peaks. `load-memory.json` keeps the flood reading and the value readings separate.
     - Thus the flood peak of ADR-0128 (ab) and the line "ADR-0064 (o) memory condition" do not change.
   - The summary shows the container ID, the peak, and the run statistic of each round. It also shows the smallest `MemAvailable` of the runner in each round, the elapsed time of the value leg, and the elapsed time of the job.
+  - After a stop before round 2, the summary shows the OOM counts and the restart count of each value reading.
 
 The measured value:
 
@@ -181,6 +191,7 @@ The measured value:
 - The peak includes the file cache and the start of the server. The ceiling is thus stricter than a bound on the heap.
 - The value leg does not check the permit count. No test proves the place of `leaf_texts` or the order of the limit list (item (c)).
 - Until change B, the ceiling does not gate round 1 (item (a)).
+- Round 2 measures the largest value of the fixture that PostgreSQL stores, not the largest form that the app accepts (item (c)).
 
 ### Risks and mitigations
 
@@ -195,6 +206,8 @@ The measured value:
   - Mitigation: the peak of round 1 includes this render, and the summary shows the peak of each round.
 - Risk: the value leg does not detect extra permits.
   - Mitigation: the route test keeps the permit count. A mutation that keeps extra copies of each round 2 body proves that the ceiling detects extra memory.
+- Risk: the in-memory store has no `parameter_value_size`. A route test can then pass with a value that PostgreSQL refuses.
+  - Mitigation: a `recipe-db` test writes the round 2 value into PostgreSQL (item (c)).
 - Risk: four large answers use the memory of the runner.
   - Mitigation: the client records the smallest `MemAvailable` of each round.
 
@@ -203,7 +216,7 @@ The measured value:
 - ADR-0128 (a), (b), (c), (i), (j), (k), (y), (z), (aa), (ab), (ac), amended by this ADR in (j), (k), (y), (z), (aa), and (ac)
 - ADR-0211 (m) to (p), amended by this ADR in (p)
 - ADR-0014 (session table), ADR-0061 (h) (Tokio workers), ADR-0064 (o), ADR-0138 (changed form body), ADR-0205 (long prefixes)
-- ADR-0223 (p) (no grid for a valid save), (v) (the heap sum of round 1), (w) (change B)
+- ADR-0223 (p) (no grid for a valid save), (v) (the heap sum of round 1), (w) (change B). This ADR amends (v) and (w).
 - `reliability.md` §6 row "Load", §7.8, §7.11
 - `api.md` §7.6
 - `overview.md` §7: R30, R31. `overview.md` §9: A26
