@@ -14,6 +14,7 @@ use recipe_domain::plant::limits::{MAX_DEPTH, MAX_LEAVES};
 use recipe_domain::plant::{LeafClass, LeafPath, LeafSegment, TypeExpr, TypeTree};
 use recipe_domain::recipe::{LeafTexts, LimitInput, LimitList, MemberValue, ParameterKey};
 
+use super::grid::{GridView, LeafInput, limit_input_id};
 use super::request_type::request_type_expr;
 use crate::error::{FieldError, FieldReason, WebError};
 use crate::hex::hex_value;
@@ -428,11 +429,18 @@ fn row_index(text: &str) -> Option<usize> {
     canonical.then(|| text.parse().ok()).flatten()
 }
 
-/// Read the value of the button `limit_mode`: the leaf path of an array level, ending in `[*]`.
+/// Read the value of the button `limit_mode`: the leaf path of a type level, ending in `[*]`.
+///
+/// A path with an index segment names one array level, not a type level. It is malformed
+/// (ADR-0223 (b)).
 fn level(text: &str) -> Result<LeafPath, WebError> {
     let reload = || bad("limit_mode", FieldReason::Reload);
     let path = leaf_path(text, FieldReason::Reload).map_err(|_error| reload())?;
-    if path.segments().last() == Some(&LeafSegment::All) {
+    let has_index = path
+        .segments()
+        .iter()
+        .any(|segment| matches!(segment, LeafSegment::Index(_)));
+    if !has_index && path.segments().last() == Some(&LeafSegment::All) {
         Ok(path)
     } else {
         Err(reload())
@@ -544,21 +552,24 @@ impl SentFields {
     /// Return the limit rows as the list of the command. A blank row is no limit.
     ///
     /// The bound texts are trimmed. Each bad maximum length gives one line under its input.
+    /// The line names the input that `grid` shows for the leaf path of the row. A grid without
+    /// that input, or no grid, gives the input of the sent row number (ADR-0223).
     ///
     /// # Errors
     ///
     /// Returns one line for each bad maximum length. Without such a line, a list that fails the
     /// list check of the domain gives one line `LimitRow` without an input.
-    pub(crate) fn limit_list(&self) -> Result<LimitList, Vec<FieldError>> {
+    pub(crate) fn limit_list(&self, grid: Option<&GridView>) -> Result<LimitList, Vec<FieldError>> {
         let mut lines = Vec::new();
         let mut rows = Vec::new();
+        let mut shown = None;
         for row in &self.limits {
             let length = match present(&row.max_length) {
                 None => None,
                 Some(text) => match max_length(&text) {
                     Some(length) => Some(length),
                     None => {
-                        lines.push(length_line(row));
+                        lines.push(length_line(row, grid, &mut shown));
                         continue;
                     }
                 },
@@ -601,12 +612,38 @@ impl SentFields {
     }
 }
 
-/// Build the line of a bad maximum length under the input `limits-<i>-max_length`.
-fn length_line(row: &SentLimit) -> FieldError {
+/// Build the line of a bad maximum length under the input of the leaf path of the row.
+///
+/// The grid names the input by the leaf path, because the copy of a mixed type level gives its
+/// rows new numbers. Without that input, the sent row number can name the input of another
+/// leaf. Then the line has no input and shows only in the summary. When the sent row number
+/// names no input of the grid, or when no grid exists, the line keeps the sent id.
+///
+/// `shown` holds the ids of the maximum length inputs of the grid. The first line that needs
+/// them fills it, so one answer scans the grid at most once.
+fn length_line<'g>(
+    row: &SentLimit,
+    grid: Option<&'g GridView>,
+    shown: &mut Option<BTreeSet<&'g str>>,
+) -> FieldError {
+    let sent = limit_input_id(row.index, "max_length");
+    let input = match grid {
+        None => sent,
+        Some(grid) => grid
+            .input_id(&row.leaf_path, LeafInput::LimitMaxLength)
+            .unwrap_or_else(|| {
+                let ids = shown.get_or_insert_with(|| grid.max_length_ids().collect());
+                if ids.contains(sent.as_str()) {
+                    String::new()
+                } else {
+                    sent
+                }
+            }),
+    };
     FieldError::bad_input(
         "field-limit-max-length",
         vec![("leaf", row.leaf_path.to_string())],
         FieldReason::MaxLength,
-        format!("limits-{}-max_length", row.index),
+        input,
     )
 }

@@ -223,7 +223,7 @@ fn grid_component_the_join_notice_is_a_warning() {
     .render()
     .unwrap();
     let notice = format!(
-        "<div class=\"alert alert-warning\">{}<span>The elements of [*] have different limits. Enter one limit for all elements.</span></div>",
+        "<div class=\"alert alert-warning\">{}<span>The elements of [*] have different limits. Array levels with different limits: 1. Enter one limit for all elements.</span></div>",
         icon("alert-warning")
     );
     assert!(html.contains(&notice), "{html}");

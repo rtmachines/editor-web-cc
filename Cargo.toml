@@ -98,6 +98,8 @@ jsonschema = { version = "0.60.0", default-features = false, features = ["arbitr
 # A build script compiles as its own crate. This level also covers it (section 2.1).
 unsafe_code = "forbid"
 unused_must_use = "deny"
+# The flag of the heap measurement run (design D6 of parameter-page-memory).
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(heap_measure)'] }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"

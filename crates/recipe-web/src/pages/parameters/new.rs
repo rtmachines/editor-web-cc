@@ -171,7 +171,7 @@ pub(crate) async fn add(
     let Ready {
         form,
         definition,
-        shown,
+        previewed,
         value,
         limits,
     } = match prepare(ctx, &sent).await? {
@@ -184,6 +184,6 @@ pub(crate) async fn add(
         .await;
     match result {
         Ok(output) => added(ctx, (&form, &definition), output),
-        Err(error) => Err(failed(ctx, &form, shown, error).await),
+        Err(error) => Err(failed(ctx, (&form, &sent, previewed.as_ref()), error).await),
     }
 }

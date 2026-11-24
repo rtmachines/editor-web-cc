@@ -7,11 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use recipe_domain::plant::{ArrayDimensions, LeafClass, Primitive, TypeNode, TypeTree};
 
-use super::limits::{LimitSet, ValueTexts, index_texts};
+use super::limits::{LimitSet, ValueTexts, index_texts, type_level};
 use super::texts::{hint_key, message, type_text};
 use super::{
     AllCell, GridBody, GridHint, GridRow, GridSource, GridView, HiddenField, InputCell, LeafIds,
-    LeafInput, LeafRow, ModeRow, ToggleRow, ValueCell,
+    LeafInput, LeafRow, ModeRow, ToggleRow, ValueCell, limit_input_id,
 };
 use crate::pages::Texts;
 
@@ -28,8 +28,8 @@ enum Step<'t> {
         limit: String,
         range: String,
     },
-    /// The mode row of the level `level`.
-    Mode { level: String, each: bool },
+    /// The mode row of the array level `level`. The row stands for its type level (ADR-0223).
+    Mode { level: String },
     /// The toggle row and the start of a group of the level `level` with `count` elements.
     Open {
         level: String,
@@ -64,6 +64,8 @@ struct Walk<'a> {
     hints: Vec<GridHint>,
     hint_ids: BTreeSet<String>,
     ids: BTreeMap<String, LeafIds>,
+    /// The type levels that have a mode row already.
+    mode_levels: BTreeSet<String>,
 }
 
 /// The counters of the `id` values of a grid.
@@ -99,6 +101,7 @@ pub(super) fn build(source: GridSource<'_>, t: Texts<'_>) -> GridView {
         hints: Vec::new(),
         hint_ids: BTreeSet::new(),
         ids: BTreeMap::new(),
+        mode_levels: BTreeSet::new(),
     };
     let mut stack = vec![Step::Node {
         node: tree.root(),
@@ -129,8 +132,8 @@ impl<'a> Walk<'a> {
                 limit,
                 range,
             } => self.node(node, value, limit, range),
-            Step::Mode { level, each } => {
-                self.mode_row(level, each);
+            Step::Mode { level } => {
+                self.mode_row(&level);
                 Vec::new()
             }
             Step::Open {
@@ -192,8 +195,9 @@ impl<'a> Walk<'a> {
 
     /// Return the steps of an array: its rows `[*]`, its mode row, and its elements.
     ///
-    /// The rows `[*]` and the mode row of a level stand once. They stand where the value path of
-    /// the array equals its limit path, or inside the rows `[*]` of an outer level.
+    /// The rows `[*]` and the mode step of a level stand once. They stand where the value path of
+    /// the array equals its limit path, or inside the rows `[*]` of an outer level. The walk
+    /// writes the mode row only at the first array level of each type level.
     fn array<'t>(
         &self,
         dimensions: &ArrayDimensions,
@@ -217,7 +221,6 @@ impl<'a> Walk<'a> {
         if owns_level {
             steps.push(Step::Mode {
                 level: level.clone(),
-                each,
             });
         }
         if value.is_none() && !each {
@@ -313,19 +316,24 @@ impl<'a> Walk<'a> {
         });
     }
 
-    /// Write the mode row of a level (ADR-0039 (k)).
-    fn mode_row(&mut self, level: String, each: bool) {
+    /// Write the mode row of the type level of the array level `level` (ADR-0039 (k), ADR-0223).
+    ///
+    /// The first array level of a type level writes the row. The array levels that follow write
+    /// none. The row shows the mode of the type level. The type level has a limit per element when
+    /// an index row sits at any of its array levels. The pressed switch overrides this mode.
+    fn mode_row(&mut self, level: &str) {
+        let level = type_level(level);
+        if !self.mode_levels.insert(level.clone()) {
+            return;
+        }
+        let each = self.limits.is_each_of_type_level(&level);
         let (button, current) = if each {
             ("grid-mode-join", "grid-mode-current-each")
         } else {
             ("grid-mode-split", "grid-mode-current-all")
         };
         let args = [("level", level.as_str())];
-        let notice = if self.limits.is_unequal(&level) {
-            message(self.t, "grid-mode-join-notice", &args)
-        } else {
-            String::new()
-        };
+        let notice = self.notice_of(&level);
         self.rows.push(GridRow::Mode(ModeRow {
             id: format!("grid-mode-{}", next(&mut self.counts.modes)),
             label: message(self.t, button, &args),
@@ -333,6 +341,26 @@ impl<'a> Walk<'a> {
             notice,
             level,
         }));
+    }
+
+    /// Write the notice of the mode row of the type level `level`, or an empty text.
+    ///
+    /// A switch back with unequal limits gives the join notice. A type level that had mixed modes
+    /// gives the mixed notice (ADR-0223 (f)).
+    fn notice_of(&self, level: &str) -> String {
+        let unequal = self.limits.unequal_count(level);
+        if unequal > 0 {
+            let count = unequal.to_string();
+            return message(
+                self.t,
+                "grid-mode-join-notice",
+                &[("level", level), ("count", count.as_str())],
+            );
+        }
+        if self.limits.is_mixed(level) {
+            return message(self.t, "grid-mode-mixed-notice", &[("level", level)]);
+        }
+        String::new()
     }
 
     /// Write the row of one leaf or of one leaf of the rows `[*]`.
@@ -412,15 +440,21 @@ impl<'a> Walk<'a> {
         if let Some(path) = spot.value.filter(|path| *path != spot.limit) {
             row.from_all = self.limit_of_all(spot.limit, is_string);
             let all = self.ids.get(spot.limit);
-            let (first, max) = (
-                all.and_then(|ids| ids.limit.clone()),
-                all.and_then(|ids| ids.limit_max.clone()),
-            );
-            if let Some(first) = first {
-                self.note(path, LeafInput::Limit, &first);
-            }
-            if let Some(max) = max {
-                self.note(path, LeafInput::LimitMax, &max);
+            let found = [
+                (LeafInput::Limit, all.and_then(|ids| ids.limit.clone())),
+                (
+                    LeafInput::LimitMax,
+                    all.and_then(|ids| ids.limit_max.clone()),
+                ),
+                (
+                    LeafInput::LimitMaxLength,
+                    all.and_then(|ids| ids.limit_max_length.clone()),
+                ),
+            ];
+            for (input, id) in found {
+                if let Some(id) = id {
+                    self.note(path, input, &id);
+                }
             }
             return;
         }
@@ -432,7 +466,7 @@ impl<'a> Walk<'a> {
         };
         let texts = self.limits.get(spot.limit);
         let input = |field: &str, text: Option<&String>| InputCell {
-            id: format!("limits-{index}-{field}"),
+            id: limit_input_id(index, field),
             name: format!("limits[{index}].{field}"),
             text: text.cloned().unwrap_or_default(),
             hint: hint.clone(),
@@ -449,6 +483,9 @@ impl<'a> Walk<'a> {
         }
         if let Some(max) = &row.max {
             self.note(spot.limit, LeafInput::LimitMax, &max.id);
+        }
+        if let Some(length) = &row.max_length {
+            self.note(spot.limit, LeafInput::LimitMaxLength, &length.id);
         }
         row.limit_path = Some(HiddenField {
             name: format!("limits[{index}].leaf_path"),
@@ -486,6 +523,7 @@ impl<'a> Walk<'a> {
             LeafInput::Value => &mut ids.value,
             LeafInput::Limit => &mut ids.limit,
             LeafInput::LimitMax => &mut ids.limit_max,
+            LeafInput::LimitMaxLength => &mut ids.limit_max_length,
         };
         slot.get_or_insert_with(|| id.to_owned());
     }

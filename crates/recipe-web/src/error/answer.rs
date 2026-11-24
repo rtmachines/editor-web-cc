@@ -404,7 +404,8 @@ fn refused_page(view: &ErrorView, form: &RenderedForm, ctx: &ErrorContext<'_>) -
     .render()
     .ok()?;
     let (head, tail) = page.rsplit_once(MAIN_END)?;
-    Some(format!("{head}{}{MAIN_END}{tail}", form.page_html()))
+    let (tag, body) = form.plain_parts();
+    joined(&[head, &tag, body, MAIN_END, tail])
 }
 
 /// Render the body of an error answer.
@@ -426,18 +427,34 @@ fn body_of(
     if let Some(page) = page_form(error, ctx).and_then(|form| refused_page(&view, form, ctx)) {
         return page;
     }
-    let mut body = render(&view, field_errors, ctx)
+    let fragment = render(&view, field_errors, ctx)
         .unwrap_or_else(|| format!("{} {}", view.code, view.reference));
-    if ctx.htmx {
-        if let WebError::Fields {
-            form: Some(form), ..
-        } = error
-        {
-            body.push_str(form.as_str());
-        }
-        body.push_str(TOAST_CLEAR);
+    if !ctx.htmx {
+        return fragment;
     }
-    body
+    let form = match error {
+        WebError::Fields {
+            form: Some(form), ..
+        } => form.as_str(),
+        _other => "",
+    };
+    joined(&[&fragment, form, TOAST_CLEAR]).unwrap_or(fragment)
+}
+
+/// Join the parts into one buffer of their exact length.
+///
+/// The function solves one problem: `push_str` grows the buffer by doubling, so the body of an
+/// HTMX answer with a form of 1 MiB holds twice its length. Return `None` when the length
+/// overflows.
+fn joined(parts: &[&str]) -> Option<String> {
+    let length = parts
+        .iter()
+        .try_fold(0_usize, |sum, part| sum.checked_add(part.len()))?;
+    let mut text = String::with_capacity(length);
+    for part in parts {
+        text.push_str(part);
+    }
+    Some(text)
 }
 
 /// Build a redirect answer.
@@ -516,3 +533,6 @@ pub(crate) fn answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
     }
     response
 }
+
+#[cfg(test)]
+mod refused_htmx_tests;

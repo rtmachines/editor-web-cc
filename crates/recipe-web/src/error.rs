@@ -31,6 +31,7 @@ mod view;
 pub use conflict::ConflictView;
 pub(crate) use form::FormErrors;
 pub use form::RenderedForm;
+pub(crate) use form::{counted_len, is_out_of_band_form, render_counted};
 pub(crate) use layer::render_errors;
 pub use lists::{FieldError, LineArg, item_lines, leaf_lines};
 pub(crate) use lists::{SHOWN_LINES, line_view, more_text};
@@ -252,6 +253,8 @@ impl IntoResponse for WebError {
 }
 
 #[cfg(test)]
+pub(crate) use answer::{ErrorContext, answer};
+#[cfg(test)]
 pub(crate) use view::FieldLine;
 #[cfg(test)]
 mod connection_tests;
@@ -275,6 +278,8 @@ mod recipe_answer_tests;
 mod recipe_expected_tests;
 #[cfg(test)]
 mod recipe_tests;
+#[cfg(test)]
+mod refused_page_peak_tests;
 #[cfg(test)]
 mod refused_page_tests;
 #[cfg(test)]

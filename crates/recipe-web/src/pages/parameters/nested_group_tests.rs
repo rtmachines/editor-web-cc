@@ -131,7 +131,7 @@ fn grid_an_array_member_of_a_struct_outside_a_group_splits_into_groups() {
 }
 
 #[test]
-fn grid_the_row_all_and_the_mode_row_of_a_nested_level_stand_inside_the_group() {
+fn grid_the_row_all_and_the_mode_row_of_a_nested_type_level_stand_inside_the_group() {
     let limits = vec![LimitTexts {
         path: LeafPath::parse("[1].arr[*]").unwrap(),
         min: "1".to_owned(),
@@ -155,9 +155,8 @@ fn grid_the_row_all_and_the_mode_row_of_a_nested_level_stand_inside_the_group() 
         .iter()
         .filter_map(GridRow::mode)
         .map(|mode| mode.level.as_str())
-        .take(2)
         .collect();
-    assert_eq!(modes, ["[1].arr[*]", "[2].arr[*]"]);
+    assert_eq!(modes, ["[*].arr[*]"]);
     assert!(first.rows.iter().all(|row| row.toggle().is_none()));
     assert_eq!(groups.len(), 2);
 }

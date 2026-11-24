@@ -428,6 +428,7 @@ The leaf grid (ADR-0039):
 - Each input of a row names the row header and its column header in `aria-labelledby`. A cell of the grid has no `label` element.
 - A cell with an input has a padding of `--space-1` on each side. Two inputs in adjacent cells or rows therefore keep the gap `--target-gap`.
 - A row `[*]` stands before the elements of its array level. It has the ground `--color-sunken`.
+- The grid has one mode row for each type level, not one for each array level (ADR-0223).
 - A cell that has no limit of its class shows a word from the bundles, for example "not applicable", in `--color-text-muted`.
 
 ### 10.5 Form field and buttons

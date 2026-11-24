@@ -16,6 +16,45 @@ const FORM_START: &str = "<form id=\"";
 /// The attribute that swaps the form out of band. Its value is a literal (ADR-0041 (e)).
 const OOB_ATTRIBUTE: &str = " hx-swap-oob=\"true\"";
 
+/// A writer that counts the bytes that it gets and keeps none of them.
+struct ByteCounter(usize);
+
+impl fmt::Write for ByteCounter {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        self.0 = self.0.checked_add(text.len()).ok_or(fmt::Error)?;
+        Ok(())
+    }
+}
+
+/// Count the bytes that `template` renders and keep none of them (design D3, ADR-0223).
+///
+/// The function solves one problem: a caller that joins several templates into one buffer needs
+/// each length first, so it can reserve the sum and no write grows the buffer.
+///
+/// # Errors
+///
+/// Returns the error of askama when the template cannot render, or when the count overflows.
+pub(crate) fn counted_len<T: Template>(template: &T) -> askama::Result<usize> {
+    let mut counter = ByteCounter(0);
+    template.render_into(&mut counter)?;
+    Ok(counter.0)
+}
+
+/// Render `template` into a `String` whose capacity equals its length (design D3, ADR-0223).
+///
+/// The first pass counts the bytes with a [`ByteCounter`]. The second pass fills a buffer of that
+/// length, so no write grows the buffer. A template that gives the same output twice needs no
+/// copy and no doubling.
+///
+/// # Errors
+///
+/// Returns the error of askama when a pass cannot render.
+pub(crate) fn render_counted<T: Template>(template: &T) -> askama::Result<String> {
+    let mut buffer = String::with_capacity(counted_len(template)?);
+    template.render_into(&mut buffer)?;
+    Ok(buffer)
+}
+
 /// The HTML of a form that an answer swaps out of band (ADR-0041 (e) and (h)).
 ///
 /// The type solves two problems. The form holds the CSRF token, so `Debug` writes only the
@@ -54,6 +93,34 @@ impl RenderedForm {
         }
     }
 
+    /// Render the form template `form` into a buffer of the exact length of its HTML (design D3).
+    ///
+    /// The function solves one problem: [`Self::from_template`] grows the `String` by doubling, so
+    /// a form of 1 MiB holds a buffer up to twice as large while the answer lives. This function
+    /// counts the bytes first, then fills a buffer of that length. The check is the same.
+    ///
+    /// # Errors
+    ///
+    /// Returns `WebError::Internal` (`E-WEB-010`) when the template cannot render, or when the
+    /// first tag is not a form with an `id` first and the attribute `hx-swap-oob="true"`.
+    pub(crate) fn from_template_exact<T: Template>(
+        form: &T,
+        request_id: RequestId,
+    ) -> Result<Self, WebError> {
+        let html = render_counted(form).map_err(|_failed| WebError::Internal { request_id })?;
+        if is_out_of_band_form(&html) {
+            Ok(Self { html, frame: None })
+        } else {
+            Err(WebError::Internal { request_id })
+        }
+    }
+
+    /// Return the capacity of the buffer of the form. Only the tests read it.
+    #[cfg(test)]
+    pub(crate) fn capacity(&self) -> usize {
+        self.html.capacity()
+    }
+
     /// Return the form with the session parts of the layout of a full page.
     #[must_use]
     pub(crate) fn with_frame(self, frame: Option<SessionFrame>) -> Self {
@@ -73,16 +140,23 @@ impl RenderedForm {
         self.frame.as_deref()
     }
 
-    /// Return the HTML of the form for a full page: a plain form without an `hx-*` attribute.
+    /// Return the HTML of the form for a full page in two parts: the plain first tag and the rest.
     ///
     /// The page of a refused form has only the elements of the layout. A target of the page that
     /// sent the form is missing there, so a boosted form would send nothing. A plain form sends a
     /// normal `POST` also while HTMX runs (ADR-0047 (a)). Only the first tag of a form template
     /// holds `hx-*` attributes, and [`Self::from_template`] checks that this tag starts the HTML.
-    pub(crate) fn page_html(&self) -> String {
+    /// The parts solve one problem: the caller writes them into a buffer of the page and makes no
+    /// copy of the form. The first part is the tag with its `>`, without any `hx-*` attribute.
+    /// The second part borrows the rest of the form.
+    pub(crate) fn plain_parts(&self) -> (String, &str) {
         match self.html.trim_start().split_once('>') {
-            Some((tag, body)) => format!("{}>{body}", plain_tag(tag)),
-            None => self.html.clone(),
+            Some((tag, body)) => {
+                let mut head = plain_tag(tag);
+                head.push('>');
+                (head, body)
+            }
+            None => (String::new(), &self.html),
         }
     }
 }
@@ -125,7 +199,7 @@ impl fmt::Debug for RenderedForm {
 ///
 /// Askama escapes `>` and `"` in each value, so the first `>` ends the first tag, and no value can
 /// add the attribute.
-fn is_out_of_band_form(html: &str) -> bool {
+pub(crate) fn is_out_of_band_form(html: &str) -> bool {
     let Some(rest) = html.trim_start().strip_prefix(FORM_START) else {
         return false;
     };

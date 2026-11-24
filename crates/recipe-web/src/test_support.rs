@@ -1,5 +1,9 @@
 //! Support code of the unit tests: a state over an in-memory store, test routes, and sessions.
 
+#[cfg(test)]
+mod bounded_tests;
+#[cfg(test)]
+pub(crate) mod heap;
 pub(crate) mod plant;
 pub(crate) mod recipes;
 pub(crate) mod source_walk;
@@ -416,9 +420,16 @@ impl Reply {
 
 /// Send one request through `router` and read the whole answer.
 pub(crate) async fn call(router: &Router, request: Request<Body>) -> Reply {
+    call_bounded(router, request, BODY_LIMIT).await
+}
+
+/// Send one request through `router` and read an answer of at most `limit` bytes.
+///
+/// `call` panics above 1 MiB. The refusal page of a form of 16 MiB is larger.
+pub(crate) async fn call_bounded(router: &Router, request: Request<Body>, limit: usize) -> Reply {
     let response = router.clone().oneshot(request).await.unwrap();
     let (parts, body) = response.into_parts();
-    let bytes = to_bytes(body, BODY_LIMIT).await.unwrap();
+    let bytes = to_bytes(body, limit).await.unwrap();
     Reply {
         status: parts.status,
         headers: parts.headers,
@@ -433,11 +444,26 @@ pub(crate) fn request(method: Method, path: &str) -> Builder {
 
 /// Send a `GET` request with the headers.
 pub(crate) async fn get_with(router: &Router, path: &str, headers: &[(&str, &str)]) -> Reply {
+    call(router, get_request(path, headers)).await
+}
+
+/// Send the same request as [`get_with`] and read an answer of at most `limit` bytes.
+pub(crate) async fn get_bounded(
+    router: &Router,
+    path: &str,
+    headers: &[(&str, &str)],
+    limit: usize,
+) -> Reply {
+    call_bounded(router, get_request(path, headers), limit).await
+}
+
+/// Build a `GET` request with the headers (see [`get_with`]).
+fn get_request(path: &str, headers: &[(&str, &str)]) -> Request<Body> {
     let mut builder = request(Method::GET, path);
     for (name, value) in headers {
         builder = builder.header(*name, *value);
     }
-    call(router, builder.body(Body::empty()).unwrap()).await
+    builder.body(Body::empty()).unwrap()
 }
 
 /// Send a same-origin form with the method `POST`, the session, and the extra headers.
@@ -464,6 +490,28 @@ pub(crate) async fn post_fields(
     headers: &[(&str, &str)],
     body: &str,
 ) -> Reply {
+    call(router, form_request(path, session, headers, body)).await
+}
+
+/// Send the same request as [`post_fields`] and read an answer of at most `limit` bytes.
+pub(crate) async fn post_fields_bounded(
+    router: &Router,
+    path: &str,
+    session: Option<&TestSession>,
+    headers: &[(&str, &str)],
+    body: &str,
+    limit: usize,
+) -> Reply {
+    call_bounded(router, form_request(path, session, headers, body), limit).await
+}
+
+/// Build a same-origin form request with the method `POST` (see [`post_fields`]).
+fn form_request(
+    path: &str,
+    session: Option<&TestSession>,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> Request<Body> {
     let mut builder = request(Method::POST, path)
         .header("content-type", "application/x-www-form-urlencoded")
         .header("sec-fetch-site", "same-origin");
@@ -475,7 +523,7 @@ pub(crate) async fn post_fields(
     for (name, value) in headers {
         builder = builder.header(*name, *value);
     }
-    call(router, builder.body(Body::from(body.to_owned())).unwrap()).await
+    builder.body(Body::from(body.to_owned())).unwrap()
 }
 
 /// Deactivate the user `login` through the use case, as the Administrator of user number 9.

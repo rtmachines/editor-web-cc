@@ -1,6 +1,6 @@
 # ADR-0045: Nested arrays inside a group
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0223 (item (b): the mode button of a nested level)
 Date: 2026-10-15
 Deciders: project owner
 

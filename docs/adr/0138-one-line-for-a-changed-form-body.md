@@ -1,6 +1,6 @@
 # ADR-0138: One line for a changed form body
 
-Status: Accepted. Amends ADR-0041 (a) (the list of bad fields) and ADR-0039 (b) (the answer to a bad key)
+Status: Accepted. Amends ADR-0041 (a) (the list of bad fields) and ADR-0039 (b) (the answer to a bad key). Amended by ADR-0223 (item (c): a `limit_mode` with an index segment)
 Date: 2026-11-07
 Deciders: project owner
 

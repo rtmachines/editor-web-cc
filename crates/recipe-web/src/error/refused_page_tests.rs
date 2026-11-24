@@ -9,8 +9,9 @@ use axum::http::StatusCode;
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::assert_clean_html;
 use crate::test_support::Reply;
+use crate::test_support::heap::BodyDigest;
 use crate::test_support::plant::{HTMX, World, main_of};
-use crate::test_support::recipes::SPEED_KEY;
+use crate::test_support::recipes::{LINE_KEY, SPEED_KEY};
 
 /// The element of an HTMX error answer that empties the status region out of band.
 const TOAST_CLEAR: &str = "<div id=\"toast\" hx-swap-oob=\"innerHTML\"></div>";
@@ -280,4 +281,94 @@ async fn error_refused_page_a_full_error_page_has_one_status_region() {
         reply.body
     );
     assert!(!reply.body.contains(TOAST_CLEAR), "{}", reply.body);
+}
+
+/// The save path of the edit form of the parameter `LINE` (`ST_Line@1`) of the draft 3 of `R-100`.
+fn line_definition() -> String {
+    format!("/recipes/R-100/versions/3/parameters/{LINE_KEY}/definition")
+}
+
+/// Return the edit form body of `LINE` with a bad value in the leaf `.zones[1].speed`.
+///
+/// The form sends the four zones and two limit rows, as the save of the route matrix does.
+fn line_body() -> String {
+    let zones: String = (1..=4)
+        .map(|zone| {
+            let speed = if zone == 1 { "abc" } else { "0" };
+            format!("&value.zones%5B{zone}%5D.speed={speed}&value.zones%5B{zone}%5D.temp_max=0")
+        })
+        .collect();
+    format!(
+        "row_version=1&unit_path=U1&tag=LINE&name_en=line&description_en=The+zones+of+the+press+line\
+         &type=ST_Line%401&value_type=ST_Line%401&s7_address=DB1.DBB0&ordinal=0{zones}\
+         &limits%5B1%5D.leaf_path=.zones%5B*%5D.speed&limits%5B2%5D.leaf_path=.zones%5B*%5D.temp_max"
+    )
+}
+
+/// Return the SHA-256 of the body of `reply` in hex, with each copy of the request id replaced.
+///
+/// The digest of the heap test support replaces the id, so a pin does not depend on it. The test
+/// asserts that the body holds the id, so the replacement runs.
+fn pinned_digest(reply: &Reply) -> (usize, String) {
+    let request_id = reply.header("x-request-id");
+    assert!(!request_id.is_empty(), "no request id: {}", reply.status);
+    assert!(reply.body.contains(&request_id), "{}", reply.body);
+    let mut digest = BodyDigest::new(&request_id);
+    digest.push(reply.body.as_bytes());
+    digest.finish()
+}
+
+/// Assert that the answer holds the grid, its mode row, and at least one limit row of `LINE`.
+///
+/// A pin of an answer without the grid would guard nothing.
+fn assert_holds_the_line_grid(reply: &Reply) {
+    let body = &reply.body;
+    assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body.contains("<table class=\"leaf-grid\">"), "{body}");
+    assert!(body.contains("name=\"limit_mode\""), "{body}");
+    assert!(body.contains("<tr class=\"row-all\">"), "{body}");
+    assert!(body.contains("name=\"limits[1].min\""), "{body}");
+    assert!(body.contains("value=\"abc\""), "{body}");
+}
+
+/// The SHA-256 of the refused page of `LINE` without `HX-Request`, as hex.
+///
+/// The bytes are those of the code after group 3 of `parameter-page-memory`. The hash input
+/// replaces each copy of the request id. Tasks 4.3 and 4.4 change the render path and must keep
+/// this value.
+const REFUSED_PAGE_SHA256: &str =
+    "c91c4c4cc3519fef6eb9fa8d800925093b2a2e94aef6a7760c2153853b7077cd";
+/// The SHA-256 of the HTMX refused answer of `LINE`, as hex.
+///
+/// The bytes are those of the code after group 3 of `parameter-page-memory`. The hash input
+/// replaces each copy of the request id. Tasks 4.3 and 4.4 change the render path and must keep
+/// this value.
+const REFUSED_HTMX_SHA256: &str =
+    "a470077ee0551e4b2c015f1a97c8954c84e555b4993dc731b19f8aea30dad224";
+
+#[tokio::test]
+async fn error_refused_page_pin_of_the_full_page_of_a_refused_line_grid() {
+    let world = recipe_world();
+    let reply = world
+        .post(&world.engineer, &line_definition(), &line_body(), false)
+        .await;
+    assert_holds_the_line_grid(&reply);
+    assert!(reply.body.starts_with("<!DOCTYPE html>"), "{}", reply.body);
+    assert_eq!(reply.header("hx-retarget"), "");
+    let (_len, sha256) = pinned_digest(&reply);
+    assert_eq!(sha256, REFUSED_PAGE_SHA256, "{}", reply.body);
+}
+
+#[tokio::test]
+async fn error_refused_page_pin_of_the_htmx_answer_of_a_refused_line_grid() {
+    let world = recipe_world();
+    let reply = world
+        .post_with(&world.engineer, &line_definition(), &line_body(), &[HTMX])
+        .await;
+    assert_holds_the_line_grid(&reply);
+    assert!(!reply.body.starts_with("<!DOCTYPE html>"), "{}", reply.body);
+    assert_eq!(reply.header("hx-retarget"), "#error-panel");
+    assert_eq!(reply.body.matches(TOAST_CLEAR).count(), 1, "{}", reply.body);
+    let (_len, sha256) = pinned_digest(&reply);
+    assert_eq!(sha256, REFUSED_HTMX_SHA256, "{}", reply.body);
 }
