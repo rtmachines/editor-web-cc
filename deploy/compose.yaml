@@ -134,6 +134,8 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
+      # Probe the allocator on the throwaway branch diag/musl-round2.
+      MIMALLOC_PURGE_DELAY: "0"
       RECIPE_DB__HOST: db
       RECIPE_DB__PORT: "5432"
       RECIPE_DB__NAME: recipe
