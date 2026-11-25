@@ -65,24 +65,27 @@ Panic containment (`reliability.md` section 2.4):
 ## Dependencies
 
 - `overview.md` section 5 gives the dependency rule of the workspace crates.
-- `deny.toml` bans six crates outside their permitted users:
+- `deny.toml` bans seven crates outside their permitted users:
   - `recipe-app` outside `recipe-db`, `recipe-web`, and `recipe-server`,
   - `recipe-web` outside `recipe-server`,
   - `recipe-export` outside `recipe-web`,
   - `recipe-db` outside `recipe-server` and its own dev-dependency, which enables the feature `test-support` for the storage tests,
   - `sqlx` outside `recipe-db`,
-  - `anyhow` outside `recipe-server` (Assumption A37).
+  - `anyhow` outside `recipe-server` (Assumption A37),
+  - `mimalloc` outside `recipe-server` (ADR-0224).
 - The proc macro `prost-derive` under `testcontainers` is the one third-party exception to the `anyhow` ban.
 - Review checks the other forbidden dependencies of `overview.md` section 5, for example `axum` and `tokio` in `recipe-domain`.
 - `cargo deny check` runs in CI. It fails on a denied license, a yanked crate, a security advisory, or a banned dependency edge.
 - `cargo audit` runs nightly against the `Cargo.lock`. `npm audit` runs nightly against `e2e/package-lock.json`.
 - `Cargo.lock` is in the repository. Dependency updates happen once per month in one pull request. A security advisory gets an update at once.
+- An update that changes the C version of `mimalloc` needs one dispatched run before the merge, as [ADR-0224 (a)](docs/adr/0224-mimalloc-on-the-musl-build.md) requires.
 - The minimum supported Rust version is the current stable at release time. `rust-version` in the workspace `Cargo.toml` records it. The project uses edition 2024.
 
 ## Code conventions
 
 - `rustfmt` uses the workspace `rustfmt.toml`.
 - No `unsafe`, no `static mut`, and no global mutable state. Shared state goes through axum `State` as `Arc<AppState>`.
+- The static `#[global_allocator]` of the musl build holds no state of the project (`reliability.md` section 8).
 - Interior mutability exists only in the places that `reliability.md` section 8 lists.
 - Every public type and function in a library crate has a doc comment.
 - Commit messages follow Conventional Commits in English, for example `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, and `chore:`.
@@ -99,6 +102,7 @@ bash deploy/ci/rust-tests.sh secure
 bash deploy/ci/rust-tests.sh release-toolchain
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo deny --locked check
+python3 -I -B deploy/ci/allocator_rule.py
 python3 -I -B tools/test_coverage_gate.py
 python3 -I -B tools/test_coverage_report.py
 python3 -I -B tools/test_coverage_inventory.py
@@ -113,6 +117,8 @@ bash -O globstar -O nullglob -c 'python3 -I tools/ste-lint/ste-lint.py docs/{arc
 The `secure` mode tests the refusal of `session.secure=false` in a build without the `dev` feature (ADR-0062 (b)).
 
 The `release-toolchain` mode needs `rustup` and network access. It installs the toolchain of `ENV RUSTUP_TOOLCHAIN=` in `deploy/Dockerfile`.
+
+The CI job `musl-unwind` runs `musl-clippy` and `mimalloc-unwind` of `deploy/ci/rust-tests.sh`. Both steps need `musl-tools`, so they run in CI only.
 
 The `openspec` job checks the specifications with the local command `openspec validate --all --strict`.
 

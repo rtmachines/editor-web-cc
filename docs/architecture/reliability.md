@@ -281,7 +281,15 @@ The `[profile.release]` section sets `overflow-checks = true`. An overflow in re
 
 A panic in application code is a bug, not an error. The system contains it and keeps serving (Assumption A41, R30):
 
-1. `[profile.release]` keeps `panic = "unwind"`. The CI job `musl-unwind` proves the unwind on the musl target of the image (ADR-0064 (m)).
+1. `[profile.release]` keeps `panic = "unwind"`. The CI job `musl-unwind` gives two proofs of the
+   unwind on the musl target of the image (ADR-0224 (o)):
+   - The panic tests of `recipe-web` unwind with the allocator of musl (ADR-0064 (m), ADR-0070 (z)).
+   - An integration test of `recipe-server` with `mimalloc` as its global allocator unwinds through
+     `CatchPanicLayer` (ADR-0224 (q)).
+
+   The test of `recipe-server` runs in the dev profile and in the release profile.
+   No CI job proves the unwind of the shipped binary, because every proof runs in a test binary.
+
 2. `recipe-server` installs a panic hook with `std::panic::set_hook` in step 1 of the start (ADR-0061). The hook writes one `tracing::error!` event with the panic message, the location, and the current `request_id` when a span is active. It increments the panic counter of 3.7. The hook does not end the process.
 3. The router has two instances of `tower_http::catch_panic::CatchPanicLayer` (ADR-0057):
    - The inner layer sits directly inside `render_errors`. A panic inside a request becomes the `500 E-WEB-010` page, HTMX fragment, or JSON body of `api.md` 5 with the `request_id`.
@@ -557,7 +565,7 @@ A value object can have a second public constructor `from_stored(stored, ..., ru
 | HTTP | `recipe-web` | `tower::ServiceExt::oneshot` with in-memory ports | Every route: status code, error code in the body, `X-Request-Id` header, security headers, no secret in the body. Login, logout, session expiry, session epoch invalidation, CSRF rejection, pre-session CSRF on `/login` and `/lang`, `must_change_password` gate. An XSS payload corpus through every text field. A panic on a page, on an HTMX request, and on an export route (ADR-0057). The answer of the backstop, with `X-Request-Id` and without the other headers of `api.md` 9. A normal answer after the panic |
 | Load | `recipe-web` with Compose database | `oha` | Login flood: 200 concurrent `POST /login` with random logins. The container stays under its memory limit, no request waits more than 5 seconds, and the Argon2 semaphore returns `503` under load. A version at the size budget: `CreateVersion`, `ApproveVersion`, and the version page each finish under 10 seconds. Parallel `POST` requests with bodies of 16 MiB on the four value routes: the container stays below `soak.memory_ceiling`. A request that waits longer than `http.body_read_timeout` gets `503 E-WEB-009` (ADR-0211) |
 | Browser regression | `recipe-web` with `examples/dev_server.rs` and its in-memory store | Playwright Test in `e2e/` (ADR-0048) | The browser-only checks of ADR-0048 (c). They include no sideways scroll at 320 CSS px, the keyboard path through the leaf grid, and the focus after a swap. They also include WCAG 2.4.11 and the CSP checks of each page. CI runs the suite on every push to `main` and on every pull request |
-| Stack | Compose stack built from zero in the CI job `compose` on `ubuntu-24.04`, on `workflow_dispatch` and on a push to `main` (ADR-0094) | Docker Compose, the scripts of `deploy/ci/`, the test scripts of `deploy/pgtools/tests/` | `/readyz` answers `ok` within 60 s. Then the job runs the checks of ADR-0070 (y). They cover the first administrator, the login, the health path variants, and the uid of `app`. They also cover the backup, the restore test, the base backup, the recovery from the WAL archive, and the stop with exit code 0. A last check requires that the backup healthcheck fails when the backup path and `pgdata` share one filesystem. A separate job `musl-unwind` runs the panic tests of `recipe-web` on the musl target (ADR-0070 (z)) |
+| Stack | Compose stack built from zero in the CI job `compose` on `ubuntu-24.04`, on `workflow_dispatch` and on a push to `main` (ADR-0094) | Docker Compose, the scripts of `deploy/ci/`, the test scripts of `deploy/pgtools/tests/` | `/readyz` answers `ok` within 60 s. Then the job runs the checks of ADR-0070 (y). They cover the first administrator, the login, the health path variants, and the uid of `app`. They also cover the backup, the restore test, the base backup, the recovery from the WAL archive, and the stop with exit code 0. A last check requires that the backup healthcheck fails when the backup path and `pgdata` share one filesystem. A separate job `musl-unwind` runs the panic tests of `recipe-web` and the unwind test of `recipe-server` with `mimalloc` on the musl target (ADR-0070 (z), ADR-0224 (q)) |
 | End to end | Compose stack | Playwright Test smoke suite in `e2e/` (ADR-0048) | Create machine, create recipe, add parameter, set limits, approve by a second user, export, check the hash, check the audit page |
 | Soak | Compose stack, nightly CI | The same request mix for 24 h at a constant rate, with a login flood every hour | Memory of the `app` container stays under 384 MiB (section 7.11). No `ERROR` line. No restart. p99 latency stays under 500 ms. For the musl image, a value above the memory ceiling or the p99 bound applies the fallback rule of ADR-0064 (o) and (p) |
 | Lint gate | Workspace | `cargo clippy --all-targets --all-features -- -D warnings`, `cargo fmt --check` | Runs on every pull request |
@@ -589,7 +597,9 @@ Three one-shot services are not part of the seven. `pitr-check` has the profile 
 Images (ADR-0064):
 
 - The project builds `recipe-server:<version>` and `recipe-pgtools:<version>`. `compose.yaml` names them with `image:` and `${RECIPE_VERSION}`. Each external image has a pinned digest.
-- `recipe-server` runs on `gcr.io/distroless/static-debian13:nonroot` as the user `65532:65532`. The binary is built for `x86_64-unknown-linux-musl`. The image holds no shell.
+- `recipe-server` runs on `gcr.io/distroless/static-debian13:nonroot` as the user `65532:65532`. The
+  binary is built for `x86_64-unknown-linux-musl`. On that target, `mimalloc` is the global
+  allocator with its default options (ADR-0224). The image holds no shell.
 - `recipe-pgtools` builds on the pinned image of `db` and adds supercronic and the scripts of `deploy/pgtools/bin/`. It runs as uid 999 (ADR-0066).
 - A release moves the images as files of `docker save`. The plant loads them with `docker load` (7.10).
 
@@ -1250,6 +1260,9 @@ A change of `approval.separation_of_duties` therefore always has an audit entry 
   Passive voice and compound tenses are advisory. They do not fail the job.
 - `rustfmt` with the workspace `rustfmt.toml`. CI runs `cargo fmt --check`.
 - CI runs `cargo clippy --all-targets --all-features -- -D warnings` with the workspace lints from section 2.1.
+- The CI job `musl-unwind` also runs clippy with `--all-targets --all-features` on `recipe-server`
+  for the target `x86_64-unknown-linux-musl`. So the code under `#[cfg(target_env = "musl")]` gets
+  the same lints (ADR-0224 (p)).
 - `cargo deny check` runs in CI. It fails on a denied license, a yanked crate, a security advisory, or a banned dependency edge. The allow list is in `deny.toml`.
 - `cargo audit` runs nightly against the `Cargo.lock`.
 - `Cargo.lock` is committed. Dependency updates happen once per month in one pull request, plus at once for a security advisory.
@@ -1272,5 +1285,8 @@ A change of `approval.separation_of_duties` therefore always has an audit entry 
   - the permits of the diff gate and of the export gate in `crates/recipe-app/src/blocking.rs` (ADR-0050 (g), ADR-0056 (a)),
   - the semaphore of `BasicGate` in `crates/recipe-app/src/identity/basic_permit.rs` (ADR-0109 (n)),
   - the counter of the layer `request_id` (`AtomicU64`, `crates/recipe-web/src/pipeline.rs`). The public router and the health router each own one counter (ADR-0213 (d)).
+- The static `#[global_allocator]` of the musl build in `crates/recipe-server/src/main.rs` holds a
+  unit value and no state of the project. The state of the allocator is in the C code of the
+  dependency `mimalloc` (ADR-0224).
 - Every public type and function in a library crate has a doc comment. `cargo doc --no-deps` runs in CI with `-D warnings` for broken links.
 - A pull request needs: green CI, one review, and an entry in `CHANGELOG.md` when behavior changes.

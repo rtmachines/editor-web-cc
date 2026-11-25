@@ -8,7 +8,7 @@ fail() {
   exit 1
 }
 
-case ${1:?} in
+case ${1:-} in
   release-toolchain)
     root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
     mapfile -t versions < <(sed -nE 's/^ENV[[:blank:]]+RUSTUP_TOOLCHAIN=(.*)$/\1/p' "$root/deploy/Dockerfile")
@@ -40,6 +40,35 @@ case ${1:?} in
         }
       '
     ;;
+  musl-clippy)
+    cargo clippy --target x86_64-unknown-linux-musl -p recipe-server \
+      --all-targets --all-features --locked -- -D warnings
+    ;;
+  mimalloc-unwind)
+    status=0
+    for profile in dev release
+    do
+      options=()
+      if [[ $profile == release ]]
+      then
+        options=(--release)
+      fi
+      cargo test --target x86_64-unknown-linux-musl -p recipe-server --test mimalloc_unwind \
+        --locked "${options[@]}" |
+        awk -v profile="$profile" '
+          { print }
+          /^test result: ok\. 1 passed;/ { passed = 1 }
+          END {
+            if (!passed) {
+              print "Expected 1 passing mimalloc unwind test in the",
+                profile, "profile." > "/dev/stderr"
+              exit 1
+            }
+          }
+        ' || status=$?
+    done
+    exit "$status"
+    ;;
   secure)
     cargo test -p recipe-server --locked --no-default-features --lib config::serve::tests::serve_secure_false_is_refused_in_a_build_without_the_dev_feature -- --exact |
       awk '
@@ -53,5 +82,7 @@ case ${1:?} in
         }
       '
     ;;
-  *) fail "usage: rust-tests.sh setup|panic|secure|release-toolchain" ;;
+  *)
+    fail "usage: rust-tests.sh setup|panic|musl-clippy|mimalloc-unwind|secure|release-toolchain"
+    ;;
 esac

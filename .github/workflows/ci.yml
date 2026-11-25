@@ -658,6 +658,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run the panic tests
         run: bash deploy/ci/rust-tests.sh panic
+      - name: Run Clippy on musl
+        run: bash deploy/ci/rust-tests.sh musl-clippy
+      - name: Run the mimalloc unwind tests
+        run: bash deploy/ci/rust-tests.sh mimalloc-unwind
 
   openspec:
     name: OpenSpec specs
@@ -839,6 +843,8 @@ jobs:
         run: cargo deny --locked check
       - name: Check the workspace dependency rule
         run: python3 -I -B deploy/ci/dependency_rule.py
+      - name: Check the allocator of the musl build
+        run: python3 -I -B deploy/ci/allocator_rule.py
 
   coverage:
     name: Coverage

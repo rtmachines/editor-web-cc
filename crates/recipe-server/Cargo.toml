@@ -53,6 +53,10 @@ parking_lot = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["fs", "std"] }
 
+# ADR-0224 (a): only the musl build uses `mimalloc`. The allocator of musl slows concurrent saves.
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = { workspace = true }
+
 # ADR-0062 (b): only a build with the feature `dev` accepts `session.secure=false`.
 # The feature is not in a default list, and the release image never enables it.
 [features]

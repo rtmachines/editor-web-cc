@@ -13,7 +13,7 @@
 FROM rust:1.99.1-slim-trixie@sha256:aab42391a986424e22d6a3ec14f37bc6dd3dacff4d457ca7cccd781e02297cc6 AS chef
 
 # RUSTUP_TOOLCHAIN has a higher precedence than rust-toolchain.toml (channel "stable").
-# Only the crate ring (C and assembly) needs musl-gcc.
+# The crate ring (C and assembly) needs the C compiler of CC_. On musl, libmimalloc-sys also needs it (ADR-0224).
 ENV RUSTUP_TOOLCHAIN=1.99.1 \
     RECIPE_TARGET=x86_64-unknown-linux-gnu \
     CC_x86_64_unknown_linux_gnu=gcc

@@ -55,6 +55,7 @@ deny = [
     { crate = "sqlx", wrappers = ["recipe-db"], reason = "overview.md section 5 lists sqlx only for recipe-db. recipe-db embeds the migrations (data-model.md section 8)" },
     # prost-derive is a proc macro under testcontainers (dev dependency of recipe-db).
     { crate = "anyhow", wrappers = ["recipe-server", "prost-derive"], reason = "Assumption A37: only the binary crate recipe-server uses anyhow" },
+    { crate = "mimalloc", wrappers = ["recipe-server"], reason = "ADR-0224: only the binary crate recipe-server sets the global allocator" },
 ]
 
 [sources]
