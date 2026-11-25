@@ -1,7 +1,7 @@
 """Check memory readings from the load job (ADR-0128 and ADR-0222).
 
 Pass the timings JSON path, the flood JSON path, and --output with an artifact path.
-Use --value PHASE=PATH for each of the six value phases.
+Use --value PHASE=PATH for each value phase.
 The value readings also require current and container_id.
 Byte values and counters accept nonnegative integers or decimal strings.
 OOMKilled accepts a JSON boolean or the Docker strings true and false.
@@ -23,7 +23,7 @@ NUMERIC_FIELDS = ("peak", "limit", "anon", "file", "oom", "oom_kill", "max", "Re
 BOUND_COUNTERS = ("oom", "oom_kill", "max", "RestartCount")
 VALUE_PHASES = (
     "value-seed", "value-precheck", "value-baseline-1", "value-round-1",
-    "value-baseline-2", "value-round-2",
+    *(f"value-{phase}-2-n{count}" for count in (1, 2, 4) for phase in ("baseline", "round")),
 )
 
 

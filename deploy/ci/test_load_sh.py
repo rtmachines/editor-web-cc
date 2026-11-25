@@ -37,6 +37,10 @@ def app_id():
 def app_cgroup():
     return pathlib.Path(os.environ["STUB_CGROUP"]).with_name(app_id())
 
+def cpu_stat(usage, periods, usec):
+    (app_cgroup() / "cpu.stat").write_text(
+        f"usage_usec {usage}\nnr_periods 13\nnr_throttled {periods}\nthrottled_usec {usec}\n")
+
 if name == "curl":
     output = pathlib.Path(option("--output"))
     if any("releases/download/" in arg for arg in args):
@@ -69,11 +73,19 @@ elif name == "load_seed":
 elif name == "load_value":
     assert pathlib.Path(option("--ci-state")) == state
     if args[0] == "round":
-        baseline = state / f"load-memory-value-baseline-{option('--round')}.json"
+        phase = option("--round")
+        if "--count" in args:
+            phase += f"-n{option('--count')}"
+        baseline = state / f"load-memory-value-baseline-{phase}.json"
         assert baseline.is_file()
         assert pathlib.Path(option("--cgroup")) == app_cgroup()
+        cpu_stat(501, 12, 41)
         (app_cgroup() / "memory.peak").write_text("150000000\n")
         (app_cgroup() / "memory.current").write_text("130000000\n")
+        if phase == "2-n1" and os.environ.get("STUB_VALUE_FAILURE") == "subrounds":
+            sys.exit(7)
+        if phase == "2-n2" and os.environ.get("STUB_VALUE_FAILURE") == "subrounds":
+            sys.exit(9)
         if option("--round") == "1":
             (app_cgroup() / "memory.events").write_text("oom 1\noom_kill 1\nmax 1\n")
             if os.environ.get("STUB_VALUE_FAILURE") == "round":
@@ -98,14 +110,19 @@ elif name == "docker":
     if args[0] == "compose":
         if "up" in args:
             assert "--force-recreate" in args and args[-1] == "app"
+            if app_id()[0] == "b" and os.environ.get("STUB_VALUE_FAILURE") == "recreate":
+                if not (state / "recreate-failed").exists():
+                    (state / "recreate-failed").touch()
+                    sys.exit(6)
             previous = app_cgroup()
             (state / "recreated").write_text(chr(ord(app_id()[0]) + 1) * 64)
             shutil.copytree(previous, app_cgroup())
             (app_cgroup() / "memory.peak").write_text("120000000\n")
-            anon = {"b": 90000000, "c": 95000000}[app_id()[0]]
+            anon = 90000000 + 5000000 * (ord(app_id()[0]) - ord("b"))
             (app_cgroup() / "memory.stat").write_text(f"anon {anon}\nfile 20000000\n")
             (app_cgroup() / "memory.current").write_text(f"{anon + 20000000}\n")
             (app_cgroup() / "memory.events").write_text("oom 0\noom_kill 0\nmax 0\n")
+            cpu_stat(10, 0, 0)
         elif "ps" in args:
             full_id = app_id()
             print(full_id[:12] if os.environ.get("STUB_SHORT_ID") == "1" else full_id)
@@ -132,7 +149,9 @@ elif name == "docker":
                 version = 4 if app_id()[0] == "c" else 3
                 print(json.dumps({"row_versions": {
                     f"LOAD-V{number}": 4 if number == 5 else version
-                    for number in range(1, 6)}}))
+                    for number in range(1, 9)}}))
+        elif args[-2:] == ["logs", "app"]:
+            print(f"app log {app_id()[0]}")
         else:
             raise AssertionError("unexpected Compose command")
     elif args[0] == "inspect":
@@ -382,14 +401,17 @@ class LoadScriptTests(unittest.TestCase):
                           for phase, reading in report.get("value", {}).items()}, {
             "value-seed": 130000000, "value-precheck": 140000000,
             "value-baseline-1": 150000000, "value-round-1": 160000000,
-            "value-baseline-2": 170000000, "value-round-2": 180000000,
+            **{f"value-{phase}-2-n{count}": peak for count in (1, 2, 4)
+               for phase, peak in (("baseline", 170000000), ("round", 180000000))},
         })
 
     def write_value_readings(self):
         fixture = json.loads((self.state / "load-memory-timings.json").read_text())
-        for phase, peak in (("seed", 130000000), ("precheck", 140000000),
-                            ("baseline-1", 150000000), ("round-1", 160000000),
-                            ("baseline-2", 170000000), ("round-2", 180000000)):
+        phases = [("seed", 130000000), ("precheck", 140000000),
+                  ("baseline-1", 150000000), ("round-1", 160000000)]
+        phases.extend((f"{phase}-2-n{count}", peak) for count in (1, 2, 4)
+                      for phase, peak in (("baseline", 170000000), ("round", 180000000)))
+        for phase, peak in phases:
             path = self.state / f"load-memory-value-{phase}.json"
             path.write_text(json.dumps(fixture | {"peak": str(peak)}))
 
@@ -399,16 +421,18 @@ class LoadScriptTests(unittest.TestCase):
         result = self.run_load("flood")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.write_value_readings()
-        (self.state / "load-memory-value-round-2.json").unlink()
+        (self.state / "load-memory-value-round-2-n2.json").unlink()
         result = self.run_load("memory-check")
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("value-round-2", result.stderr)
+        self.assertIn("value-round-2-n2", result.stderr)
 
     def value_events(self):
         events = []
         for name, args in map(json.loads, self.events_path.read_text().splitlines()):
             if name == "load_value":
                 number = args[args.index("--round") + 1] if "--round" in args else ""
+                if "--count" in args:
+                    number += "-n" + args[args.index("--count") + 1]
                 events.append((args[0], number))
             elif "--force-recreate" in args:
                 events.append(("recreate", ""))
@@ -424,40 +448,79 @@ class LoadScriptTests(unittest.TestCase):
         self.assertEqual(self.value_events(), [
             ("single", "1"), ("single", "2"), ("versions", ""), ("check-precheck", ""),
             ("reading", "a"), ("recreate", ""), ("reading", "b"), ("round", "1"),
-            ("reading", "b"), ("versions", ""), ("check-round", "1"), ("recreate", ""),
-            ("reading", "c"), ("round", "2"), ("reading", "c"), ("versions", ""),
+            ("reading", "b"), ("versions", ""), ("check-round", "1"),
+            *((event, detail) for phase, container in (("2-n1", "c"), ("2-n2", "d"),
+                                                      ("2-n4", "e"))
+              for event, detail in (("recreate", ""), ("reading", container), ("round", phase),
+                                    ("reading", container), ("versions", ""),
+                                    ("check-round", phase))),
         ])
         for phase, container, current in (
             ("precheck", "a", "100000000"), ("baseline-1", "b", "110000000"),
-            ("round-1", "b", "130000000"), ("baseline-2", "c", "115000000"),
-            ("round-2", "c", "130000000"),
+            ("round-1", "b", "130000000"), ("baseline-2-n1", "c", "115000000"),
+            ("round-2-n1", "c", "130000000"), ("baseline-2-n2", "d", "120000000"),
+            ("round-2-n2", "d", "130000000"), ("baseline-2-n4", "e", "125000000"),
+            ("round-2-n4", "e", "130000000"),
         ):
             reading = json.loads((self.state / f"load-memory-value-{phase}.json").read_text())
             self.assertEqual(reading["container_id"], container * 64)
             self.assertEqual(reading["current"], current)
             self.assertEqual(reading["oom_kill"], "1" if phase == "round-1" else "0")
-        for phase, version in (("precheck", 3), ("1", 3), ("2", 4)):
-            versions = json.loads((self.state / f"load-value-versions-{phase}.json").read_text())
-            self.assertEqual(versions, {"row_versions": {
-                "LOAD-V1": version, "LOAD-V2": version, "LOAD-V3": version,
-                "LOAD-V4": version, "LOAD-V5": 4,
-            }})
+        for phase in ("precheck", "1", "2-n1", "2-n2", "2-n4"):
+            path = self.state / f"load-value-versions-{phase}.json"
+            self.assertEqual(json.loads(path.read_text())["row_versions"]["LOAD-V5"], 4)
         for args in self.events("load_value"):
             if args[0] in ("single", "round"):
                 self.assertIn("https://localhost:8443", args)
                 self.assertIn((self.state / "root.crt").as_posix(), args)
             if args[0] == "single":
                 self.assertEqual(args[args.index("--reference") + 1], "LOAD-V5")
-            if args[0] == "round":
-                number = int(args[args.index("--round") + 1])
-                self.assertEqual(args[args.index("--reference-anon") + 1],
-                                 ("90000000", "95000000")[number - 1])
+        rounds = [args for args in self.events("load_value") if args[0] == "round"]
+        self.assertEqual([args[args.index("--reference-anon") + 1] for args in rounds],
+                         ["90000000", "95000000", "100000000", "105000000"])
+
+    def test_value_writes_cpu_samples_and_saves_logs_before_each_recreate(self):
+        result = self.run_load("value")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = [args for args in self.events("docker")
+                  if "--force-recreate" in args or args[-2:] == ["logs", "app"]]
+        kinds = ["recreate" if "--force-recreate" in args else "logs" for args in events]
+        self.assertEqual(kinds, ["logs", "recreate"] * 4 + ["logs"])
+        for phase, container in zip(("precheck", "1", "2-n1", "2-n2", "2-n4"), "abcde"):
+            self.assertEqual((self.state / f"load-value-app-{phase}.log").read_text(),
+                             f"app log {container}\n")
+            if phase == "precheck":
+                continue
+            for point, values in (("before", (10, 0, 0)), ("after", (501, 12, 41))):
+                path = self.state / f"load-value-cpu-{phase}-{point}.json"
+                fields = ("usage_usec", "nr_throttled", "throttled_usec")
+                self.assertEqual(json.loads(path.read_text()), dict(zip(fields, values)))
+
+    def test_value_keeps_the_first_failure_and_measures_all_subrounds(self):
+        result = self.run_load("value", STUB_VALUE_FAILURE="subrounds")
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertIn("round 2-n1 failed with exit status 7", result.stderr)
+        for phase in ("2-n1", "2-n2", "2-n4"):
+            self.assertIn(("round", phase), self.value_events())
+            self.assertTrue((self.state / f"load-memory-value-round-{phase}.json").is_file())
+            sample = self.state / f"load-value-cpu-{phase}-after.json"
+            self.assertEqual(json.loads(sample.read_text())["usage_usec"], 501)
+        self.assertEqual((self.state / "load-value-app-2-n4.log").read_text(), "app log e\n")
+
+    def test_value_keeps_running_after_a_subround_recreate_fails(self):
+        result = self.run_load("value", STUB_VALUE_FAILURE="recreate")
+        self.assertEqual(result.returncode, 6, result.stderr)
+        self.assertNotIn(("round", "2-n1"), self.value_events())
+        self.assertIn(("round", "2-n2"), self.value_events())
+        self.assertIn(("round", "2-n4"), self.value_events())
+        self.assertTrue((self.state / "load-value-app-2-n4.log").is_file())
 
     def test_value_stops_before_recreate_when_the_precheck_fails(self):
         result = self.run_load("value", STUB_VALUE_FAILURE="check-precheck")
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertFalse((self.state / "recreated").exists())
         self.assertTrue((self.state / "load-memory-value-precheck.json").is_file(), result.stderr)
+        self.assertEqual((self.state / "load-value-app-precheck.log").read_text(), "app log a\n")
         self.assertEqual(self.value_events()[-2:], [("check-precheck", ""), ("reading", "a")])
 
     def test_value_reads_memory_when_the_second_single_fails(self):
@@ -500,7 +563,8 @@ class LoadScriptTests(unittest.TestCase):
         self.assertTrue(reading_path.is_file(), result.stderr)
         reading = json.loads(reading_path.read_text())
         self.assertEqual(reading["peak"], "150000000")
-        self.assertFalse((self.state / "load-memory-value-baseline-2.json").exists())
+        self.assertFalse(any(self.state.glob("load-memory-value-baseline-2-*.json")))
+        self.assertEqual((self.state / "load-value-app-1.log").read_text(), "app log b\n")
 
     def test_value_keeps_the_round_one_reading_when_the_client_fails(self):
         self.assert_round_one_stop("round")
@@ -514,6 +578,8 @@ class LoadScriptTests(unittest.TestCase):
         result = self.run_load("value-seed")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.events("load_seed"), [["value"]])
+        self.assertEqual(self.events("load_value"), [["seed-extra", "--ci-state",
+                                                       self.state.as_posix()]])
         self.assertEqual((self.state / "load-value-leg-start").read_text(), "1793870400\n")
         reading = json.loads((self.state / "load-memory-value-seed.json").read_text())
         self.assertEqual(reading["container_id"], "a" * 64)

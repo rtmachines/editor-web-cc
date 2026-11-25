@@ -3,6 +3,7 @@
 import argparse
 import concurrent.futures
 import http.client
+import http.cookies
 import importlib.util
 import io
 import json
@@ -15,6 +16,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -25,6 +27,10 @@ _spec = importlib.util.spec_from_file_location(
     "_value_load_memory", pathlib.Path(__file__).with_name("load_memory.py"))
 _memory = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_memory)
+_spec = importlib.util.spec_from_file_location(
+    "_value_load_seed", pathlib.Path(__file__).with_name("load_seed.py"))
+_seed = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_seed)
 
 
 ARRAY_LEVELS = 32
@@ -72,12 +78,24 @@ def build_body(round_number: int, row_version: int, unit_path: str, ordinal: int
 
 
 REFERENCES = tuple(f"LOAD-V{number}" for number in range(1, 6))
+EXTRA_REFERENCES = ("LOAD-V6", "LOAD-V7", "LOAD-V8")
+ROUND_TWO_REFERENCES = {1: EXTRA_REFERENCES[:1], 2: EXTRA_REFERENCES[1:], 4: REFERENCES[:4]}
+ROUNDS = ((1, 4), *((2, count) for count in ROUND_TWO_REFERENCES))
 BARRIER_TIMEOUT = 8
-# Match http.request_timeout in reliability.md section 7.11.
-REQUEST_TIMEOUT = 30
+SINGLE_REQUEST_TIMEOUT = 30
+# Give the server time to answer after its own timeout.
+REQUEST_TIMEOUT = 120
 FIELD = re.compile(rb'<div class="field-error" id="([a-z0-9_.\[\]-]+)-error">')
 CODE = re.compile(rb'<span class="field-error-code">(E-[A-Z]{3}-[0-9]{3})</span>')
 KEY = re.compile(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
+
+
+def round_phase(number, count):
+    return "1" if number == 1 else f"2-n{count}"
+
+
+def round_references(number, count):
+    return REFERENCES[:4] if number == 1 else ROUND_TWO_REFERENCES[count]
 
 
 def remaining(deadline):
@@ -210,7 +228,7 @@ class ValueSender:
 
     def send(self, draft, start, barrier=None):
         answer = draft.answer
-        deadline = start + REQUEST_TIMEOUT if barrier is None else barrier.deadline
+        deadline = start + SINGLE_REQUEST_TIMEOUT if barrier is None else barrier.deadline
         at_barrier = False
         try:
             with self.connect(deadline) as raw:
@@ -332,7 +350,7 @@ def run_round(args, sender, drafts):
 
 ROUND_ONE_MIN_BYTES = 16 * 1024 * 1024 - 64 * 1024
 ROUND_ONE_MAX_BYTES = 16 * 1024 * 1024
-MEMORY_PHASES = ("seed", "precheck", "baseline-1", "round-1", "baseline-2", "round-2")
+MEMORY_PHASES = tuple(phase.removeprefix("value-") for phase in _memory.VALUE_PHASES)
 CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
 
 
@@ -350,16 +368,17 @@ class ValueCheck:
         self.failures = []
         state = self.read("load-value-state.json", "value state")
         drafts = state.get("drafts")
+        references = REFERENCES + EXTRA_REFERENCES
         rows = {}
         if isinstance(drafts, list):
             for draft in drafts:
-                if isinstance(draft, dict) and draft.get("reference") in REFERENCES:
+                if isinstance(draft, dict) and draft.get("reference") in references:
                     rows[draft["reference"]] = draft
-        if not isinstance(drafts, list) or len(drafts) != len(rows) or len(rows) != len(REFERENCES):
-            self.failures.append("The value state must contain the five drafts.")
+        if not isinstance(drafts, list) or len(drafts) != len(rows) or len(rows) != len(references):
+            self.failures.append("The value state must contain the eight drafts.")
         self.keys = {}
         self.seed_versions = {}
-        for ref in REFERENCES:
+        for ref in references:
             draft = rows.get(ref, {})
             key = draft.get("key")
             if isinstance(key, str) and KEY.fullmatch(key):
@@ -436,15 +455,16 @@ class ValueCheck:
         self.compare_version(f"pre-check {ref}", version, self.seed_versions[ref], True)
         return version
 
-    def check_round_answers(self, number, summary):
-        label = f"round {number}"
-        batch = self.read(f"load-value-answers-{number}.json", f"{label} answers")
+    def check_round_answers(self, number, count, summary):
+        phase = round_phase(number, count)
+        label = f"round {phase}"
+        batch = self.read(f"load-value-answers-{phase}.json", f"{label} answers")
         answers = batch.get("answers")
-        refs = REFERENCES[:4]
+        refs = round_references(number, count)
         if json_count(batch.get("round")) != number:
             self.failures.append(f"{label} answers have an incorrect round")
-        if not isinstance(answers, list) or len(answers) != len(refs):
-            self.failures.append(f"{label} must contain four answers")
+        if not isinstance(answers, list) or len(answers) != count:
+            self.failures.append(f"{label} must contain {count} answers")
             answers = answers if isinstance(answers, list) else []
         rows = {}
         lengths = []
@@ -470,17 +490,19 @@ class ValueCheck:
                 if number == 1 and not ROUND_ONE_MIN_BYTES <= size <= ROUND_ONE_MAX_BYTES:
                     self.failures.append(f"{label} {ref} body length is outside the 16 MiB window")
         if rows != {ref: self.keys.get(ref) for ref in refs}:
-            self.failures.append(f"{label} does not use the four draft keys from the state file")
+            self.failures.append(f"{label} does not use the {count} draft keys from the state file")
         return batch, lengths
 
-    def check_round(self, number, precheck, summary=None):
-        batch, lengths = self.check_round_answers(number, summary)
-        versions = self.read_versions(number, REFERENCES)
-        for ref in REFERENCES:
-            measured = ref != REFERENCES[-1]
-            base = self.seed_versions[ref] if measured else precheck
-            self.compare_version(f"round {number} {ref}", versions.get(ref), base,
-                                 number == 2 and measured)
+    def check_round(self, number, count, precheck, summary=None):
+        phase = round_phase(number, count)
+        batch, lengths = self.check_round_answers(number, count, summary)
+        refs = round_references(number, count)
+        versions = self.read_versions(phase, refs + REFERENCES[-1:])
+        for ref in refs:
+            self.compare_version(f"round {phase} {ref}", versions.get(ref),
+                                 self.seed_versions[ref], number == 2)
+        ref = REFERENCES[-1]
+        self.compare_version(f"round {phase} {ref}", versions.get(ref), precheck, False)
         return batch, lengths
 
     def read_memory(self, phase):
@@ -500,14 +522,14 @@ class ValueCheck:
         values["container_id"] = container
         return values, bool(raw)
 
-    def check_overlap(self, number, batch, lengths, baseline):
+    def check_overlap(self, phase, count, batch, lengths, baseline):
         reference = json_count(batch.get("reference_anon"))
         barrier = json_count(batch.get("barrier_anon"))
         if reference is None or (baseline is not None and reference != baseline):
-            self.failures.append(f"round {number} reference_anon must equal the baseline anon")
-        if barrier is None or (reference is not None and len(lengths) == 4
+            self.failures.append(f"round {phase} reference_anon must equal the baseline anon")
+        if barrier is None or (reference is not None and len(lengths) == count
                                and barrier - reference < sum(lengths)):
-            self.failures.append(f"round {number}: the bodies did not overlap")
+            self.failures.append(f"round {phase}: the bodies did not overlap")
 
     def elapsed(self, now, path, label):
         try:
@@ -519,36 +541,42 @@ class ValueCheck:
         self.failures.append(f"{label} start time is missing or invalid")
         return None
 
-    def round_result(self, number, baseline, reading, batch, lengths):
+    def round_result(self, number, count, baseline, reading, batch, lengths):
+        phase = round_phase(number, count)
         container = reading.get("container_id")
         if container and baseline.get("container_id") and container != baseline["container_id"]:
-            self.failures.append(f"round {number} container ID differs from its baseline")
-        self.check_overlap(number, batch, lengths, baseline.get("anon"))
+            self.failures.append(f"round {phase} container ID differs from its baseline")
+        self.check_overlap(phase, count, batch, lengths, baseline.get("anon"))
         available = json_count(batch.get("mem_available_min_kib"))
         if available is None:
-            self.failures.append(f"round {number} MemAvailable is missing or invalid")
+            self.failures.append(f"round {phase} MemAvailable is missing or invalid")
         peak, current = reading.get("peak"), baseline.get("current")
-        statistic = (peak - current) / 4 if peak is not None and current is not None else None
-        return {"round": number, "container_id": container, "peak": peak,
+        if number == 2 and peak is not None and peak >= _memory.SOAK_MEMORY_CEILING:
+            self.failures.append(f"round {phase} reading reached the ceiling of 384 MiB")
+        statistic = (peak - current) / count if peak is not None and current is not None else None
+        return {"round": number, "count": count, "container_id": container, "peak": peak,
                 "body_bytes": max(lengths, default=None), "run_statistic": statistic,
                 "mem_available_min_kib": available}
 
-    def has_round_files(self, number):
-        names = (f"load-value-answers-{number}.json", f"load-memory-value-round-{number}.json",
-                 f"load-value-versions-{number}.json")
+    def has_round_files(self, phase):
+        names = (f"load-value-answers-{phase}.json", f"load-memory-value-round-{phase}.json",
+                 f"load-value-versions-{phase}.json")
         return any((self.directory / name).is_file() for name in names)
 
     def check_round_readings(self, readings):
-        round_one = readings["round-1"][0]["container_id"]
-        round_two = readings["round-2"][0]["container_id"]
-        if round_one is not None and round_one == round_two:
-            self.failures.append("Both rounds use the same container ID")
-        peak = readings["round-2"][0]["peak"]
-        if peak is not None and peak >= _memory.SOAK_MEMORY_CEILING:
-            self.failures.append("round 2 reading reached the ceiling of 384 MiB")
+        containers = set()
+        for number, count in ROUNDS:
+            phase = round_phase(number, count)
+            container = readings[f"round-{phase}"][0]["container_id"]
+            if container is not None:
+                if container in containers:
+                    self.failures.append(
+                        f"round {phase} uses the same container ID as an earlier round")
+                containers.add(container)
 
     def check_all(self, job_start, summary_path):
-        stopped = not self.has_round_files(2)
+        stopped = not any(self.has_round_files(round_phase(2, count))
+                          for count in ROUND_TWO_REFERENCES)
         summary = []
         readings = {
             phase: self.read_memory(f"value-{phase}") for phase in MEMORY_PHASES
@@ -560,23 +588,25 @@ class ValueCheck:
                 if phase != "round-1":
                     summary.extend(reading_summary(f"value-{phase}", reading))
             precheck = self.check_precheck(summary)
-            numbers = (1,) if self.has_round_files(1) else ()
+            runs = ROUNDS[:1] if self.has_round_files("1") else ()
         else:
             precheck = self.read_versions("precheck", REFERENCES[-1:]).get(REFERENCES[-1])
             self.check_round_readings(readings)
-            numbers = (1, 2)
+            runs = ROUNDS
 
         rounds = []
-        for number in numbers:
-            batch, lengths = self.check_round(number, precheck, summary if stopped else None)
-            baseline, _ = readings.get(f"baseline-{number}", ({}, False))
-            reading, present = readings.get(f"round-{number}", ({}, False))
+        for number, count in runs:
+            phase = round_phase(number, count)
+            details = summary if stopped or number == 2 else None
+            batch, lengths = self.check_round(number, count, precheck, details)
+            baseline, _ = readings.get(f"baseline-{phase}", ({}, False))
+            reading, present = readings.get(f"round-{phase}", ({}, False))
             if stopped and not reading:
-                self.failures.append(f"value-round-{number} reading is missing or invalid")
-            result = self.round_result(number, baseline, reading, batch, lengths)
+                self.failures.append(f"value-round-{phase} reading is missing or invalid")
+            result = self.round_result(number, count, baseline, reading, batch, lengths)
             if present:
                 rounds.append(result)
-            if present or (stopped and (reading or batch)):
+            if present or batch:
                 summary.extend(round_summary(result, baseline, reading))
         now = int(time.time())
         job = self.elapsed(now, job_start, "job")
@@ -614,7 +644,7 @@ def reading_summary(label, reading):
 
 
 def round_summary(result, baseline, reading):
-    label = f"round {result['round']}"
+    label = f"round {round_phase(result['round'], result['count'])}"
     size = result["body_bytes"]
     triple = 3 * size if size is not None else None
     lines = reading_summary(label, reading) if reading else []
@@ -634,7 +664,12 @@ def run_checker(args):
         checker.check_precheck()
     elif args.command == "check-round":
         precheck = checker.read_versions("precheck", REFERENCES[-1:]).get(REFERENCES[-1])
-        checker.check_round(args.round, precheck)
+        batch, lengths = checker.check_round(args.round, args.count, precheck)
+        if args.round == 2:
+            phase = round_phase(args.round, args.count)
+            baseline, _ = checker.read_memory(f"value-baseline-{phase}")
+            reading, _ = checker.read_memory(f"value-round-{phase}")
+            checker.round_result(args.round, args.count, baseline, reading, batch, lengths)
     else:
         checker.check_all(args.job_start, args.summary)
     return checker.failures
@@ -660,11 +695,14 @@ def arguments(argv):
     round_parser.add_argument("--deadline", type=float, default=BARRIER_TIMEOUT)
     precheck = commands.add_parser("check-precheck")
     check_round = commands.add_parser("check-round")
-    check_round.add_argument("--round", required=True, type=int, choices=(1,))
+    check_round.add_argument("--round", required=True, type=int, choices=(1, 2))
     check = commands.add_parser("check")
     check.add_argument("--job-start", required=True, type=pathlib.Path)
     check.add_argument("--summary", required=True, type=pathlib.Path)
-    for command in (precheck, check_round, check):
+    for command in (round_parser, check_round):
+        command.add_argument("--count", type=int, choices=ROUND_TWO_REFERENCES)
+    seed_extra = commands.add_parser("seed-extra")
+    for command in (precheck, check_round, check, seed_extra):
         command.add_argument("--ci-state", required=True, type=pathlib.Path)
     for command in (single, round_parser):
         command.add_argument("--ci-state", required=True, type=pathlib.Path)
@@ -672,7 +710,12 @@ def arguments(argv):
         command.add_argument("--url", required=True)
         command.add_argument("--cacert", required=True, type=pathlib.Path)
     args = parser.parse_args(argv)
-    if args.command in ("check-precheck", "check-round", "check"):
+    if args.command in ("round", "check-round"):
+        if (args.round == 2) != (args.count is not None):
+            parser.error(None)
+        if args.round == 1:
+            args.count = 4
+    if args.command not in ("single", "round"):
         return args
     try:
         args.url = urllib.parse.urlsplit(args.url)
@@ -689,6 +732,20 @@ def arguments(argv):
     return args
 
 
+def seed_extra_drafts(directory):
+    path = directory / "load-value-state.json"
+    state = json.loads(path.read_text(encoding="utf-8"))
+    client = _seed.Client(directory)
+    cookies = http.cookies.SimpleCookie(state["cookie"])
+    client.cookies = {name: cookie.value for name, cookie in cookies.items()}
+    # Keep the original four drafts for the four-save run.
+    state["drafts"].extend(_seed.seed_value_draft(client, number) for number in (6, 7, 8))
+    with tempfile.TemporaryDirectory(dir=directory) as temporary:
+        staged = pathlib.Path(temporary) / path.name
+        staged.write_text(json.dumps(state) + "\n", encoding="utf-8")
+        staged.replace(path)
+
+
 def run_sender(args):
     state = json.loads((args.ci_state / "load-value-state.json").read_text(encoding="utf-8"))
     drafts = {draft["reference"]: draft for draft in state["drafts"]}
@@ -699,9 +756,9 @@ def run_sender(args):
         report, failure = draft.answer, draft.answer["error"]
         name = f"load-value-precheck-{args.round}.json"
     else:
-        batch = list(draft_bodies(args.round, drafts, REFERENCES[:4]))
+        batch = list(draft_bodies(args.round, drafts, round_references(args.round, args.count)))
         report, failure = run_round(args, sender, batch)
-        name = f"load-value-answers-{args.round}.json"
+        name = f"load-value-answers-{round_phase(args.round, args.count)}.json"
     (args.ci_state / name).write_text(json.dumps(report, allow_nan=False) + "\n", encoding="utf-8")
     return failure
 
@@ -713,7 +770,10 @@ def cli(argv=None):
         print(error, file=sys.stderr)
         return 2
     try:
-        if args.command in ("single", "round"):
+        if args.command == "seed-extra":
+            seed_extra_drafts(args.ci_state)
+            failures = []
+        elif args.command in ("single", "round"):
             failure = run_sender(args)
             failures = [failure] if failure is not None else []
         else:

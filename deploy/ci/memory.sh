@@ -7,6 +7,21 @@ memory_log() {
   printf '%s\n' "$1" | tee -a "$CI_STATE/memory.log" || true
 }
 
+cpu_cgroup() {
+  local reading
+  reading=$(sudo -n awk '
+    $2 ~ /^(0|[1-9][0-9]*)$/ { counters[$1] = $2 }
+    END {
+      usage = ("usage_usec" in counters) ? counters["usage_usec"] : "null"
+      periods = ("nr_throttled" in counters) ? counters["nr_throttled"] : "null"
+      usec = ("throttled_usec" in counters) ? counters["throttled_usec"] : "null"
+      printf "{\"usage_usec\":%s,\"nr_throttled\":%s,\"throttled_usec\":%s}\n", usage, periods, usec
+    }
+  ' "$1/cpu.stat" 2>/dev/null) ||
+    reading='{"usage_usec":null,"nr_throttled":null,"throttled_usec":null}'
+  printf '%s\n' "$reading"
+}
+
 memory_cgroup() {
   local service=$1 path=$2 limit=$3 peak anon file oom_kill
   peak=$(sudo -n cat "$path/memory.peak" 2>/dev/null) || peak=

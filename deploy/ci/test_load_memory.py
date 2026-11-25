@@ -13,7 +13,7 @@ import unittest
 SCRIPT = pathlib.Path(__file__).with_name("load_memory.py")
 VALUE_PHASES = (
     "value-seed", "value-precheck", "value-baseline-1", "value-round-1",
-    "value-baseline-2", "value-round-2",
+    *(f"value-{phase}-2-n{count}" for count in (1, 2, 4) for phase in ("baseline", "round")),
 )
 
 
@@ -174,10 +174,10 @@ class LoadMemoryTests(unittest.TestCase):
         self.assertIn("ADR-0064 (o) memory condition: met", summary)
 
     def test_missing_value_phase_fails_the_check(self):
-        result, artifact, _ = self.run_value_cli(missing="value-baseline-2")
+        result, artifact, _ = self.run_value_cli(missing="value-baseline-2-n2")
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertFalse(artifact["passed"])
-        self.assertIn("value-baseline-2", result.stderr)
+        self.assertIn("value-baseline-2-n2", result.stderr)
 
     def test_round_one_reports_each_bound_that_fails_round_two(self):
         for field, value in (("oom", 1), ("oom_kill", 1), ("max", 1),
@@ -191,10 +191,10 @@ class LoadMemoryTests(unittest.TestCase):
                 self.assertIn(f"value-round-1 {label}: {reported}", summary)
                 if field == "peak":
                     self.assertEqual(artifact["peak"], value)
-                result, artifact, _ = self.run_value_cli({"value-round-2": {field: value}})
+                result, artifact, _ = self.run_value_cli({"value-round-2-n4": {field: value}})
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertFalse(artifact["passed"])
-                self.assertIn(f"value-round-2 {label}", result.stderr)
+                self.assertIn(f"value-round-2-n4 {label}", result.stderr)
 
     def test_round_one_unavailable_peak_fails_the_check(self):
         result, artifact, _ = self.run_value_cli({"value-round-1": {"peak": "unavailable"}})

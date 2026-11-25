@@ -291,14 +291,17 @@ def check_load_artifacts(steps):
                  'upload action must use a pinned revision')
     require_load(upload, r'^          name: load-\$\{\{ matrix.image \}\}$', 'artifact must name its leg')
     require_load(upload, r'^          if-no-files-found: error$', 'missing values must fail the upload')
-    require_load(upload, r"^        if: \$\{\{ !cancelled\(\) && steps.values.outcome == 'success' \}\}$",
-                 'upload must require the values check')
+    require_load(upload, r"^        if: \$\{\{ !cancelled\(\) && "
+                 r"steps.seed.outcome == 'success' \}\}$",
+                 'upload must run after a value failure')
     paths = re.findall(r'^            (.+)$', upload, re.M)
     prefix = '${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/'
-    reports = ('seed', 'timings', 'flood', 'memory', 'value')
-    expected = [prefix + f'load-{name}.json' for name in reports]
+    reports = ('seed.json', 'timings.json', 'flood.json', 'memory.json', 'value.json',
+               'value-precheck-*.json', 'value-answers-*.json', 'memory-value-*-2-n*.json',
+               'value-cpu-*.json', 'value-app-*.log')
+    expected = [prefix + f'load-{name}' for name in reports]
     if paths != expected:
-        raise SystemExit('load must upload only its five JSON value reports')
+        raise SystemExit('load must upload its value reports and diagnostics')
     for field in ('seed_seconds', 'timings_seconds', 'logins_per_second', 'p99_seconds', 'peak'):
         if field not in steps['values']:
             raise SystemExit('load does not require all measured values')
@@ -341,17 +344,22 @@ def load_values_fixture():
                              'oom_kill', 'max', 'RestartCount'), 0)
     reading.update(container_id='a' * 64, OOMKilled=False, peak=100, limit=536870912)
     phases = {f'value-{phase}': reading.copy() for phase in (
-        'seed', 'precheck', 'baseline-1', 'round-1', 'baseline-2', 'round-2',
+        'seed', 'precheck', 'baseline-1', 'round-1',
+        *(f'{phase}-2-n{count}' for count in (1, 2, 4) for phase in ('baseline', 'round')),
     )}
     phases['value-round-1'].update(peak=536870912, oom=1, max=1, RestartCount=1)
-    phases['value-baseline-2']['container_id'] = 'b' * 64
-    phases['value-round-2'].update(peak=402653184, container_id='b' * 64)
-    rounds = [
-        {'round': number, 'container_id': phase['container_id'], 'peak': phase['peak'],
-         'body_bytes': 16777216 if number == 1 else 13206677,
-         'run_statistic': phase['peak'] / 4, 'mem_available_min_kib': 1024}
-        for number, phase in enumerate((phases['value-round-1'], phases['value-round-2']), 1)
-    ]
+    rounds = []
+    for number, count, digit in ((1, 4, 'a'), (2, 1, 'b'), (2, 2, 'c'), (2, 4, 'd')):
+        suffix = '1' if number == 1 else f'2-n{count}'
+        baseline, phase = (phases[f'value-{name}-{suffix}'] for name in ('baseline', 'round'))
+        baseline['container_id'] = phase['container_id'] = digit * 64
+        if number == 2:
+            phase['peak'] = 402653184
+        rounds.append({
+            'round': number, 'count': count, 'container_id': phase['container_id'],
+            'peak': phase['peak'], 'body_bytes': 16777216 if number == 1 else 3033541,
+            'run_statistic': phase['peak'] / count, 'mem_available_min_kib': 1024,
+        })
     return {
         'seed': {'seed_seconds': 1},
         'timings': {'seed_seconds': 1, 'timings_seconds': dict.fromkeys(
@@ -359,7 +367,7 @@ def load_values_fixture():
         'flood': {'logins_per_second': 1, 'p99_seconds': 0.1},
         'memory': {'timings': reading, 'flood': reading, 'value': phases,
                    'peak': 536870912, 'adr_0064_o_memory_condition': 'met'},
-        'value': {'passed': False, 'failures': ['round 2 reached the ceiling'], 'rounds': rounds,
+        'value': {'passed': False, 'failures': ['round 2-n1 reached the ceiling'], 'rounds': rounds,
                   'job_elapsed_s': 20, 'leg_elapsed_s': 10},
     }
 
@@ -377,13 +385,16 @@ def test_load_values(step):
     if not match:
         raise SystemExit('load values has no isolated Python check')
     with tempfile.TemporaryDirectory() as directory:
-        for expected in ('', 'value-round-1 peak', 'value-round-2 reading'):
+        for expected in ('', 'value-round-1 peak', 'value-round-2-n2 reading',
+                         'round 2 with 2 saves count'):
             reports = load_values_fixture()
             phases = reports['memory']['value']
             if expected == 'value-round-1 peak':
                 phases['value-round-1']['peak'] = None
+            elif expected == 'value-round-2-n2 reading':
+                del phases['value-round-2-n2']
             elif expected:
-                del phases['value-round-2']
+                reports['value']['rounds'][2]['count'] = 4
             for name, report in reports.items():
                 path = Path(directory) / f'load-{name}.json'
                 path.write_text(json.dumps(report), encoding='utf-8')

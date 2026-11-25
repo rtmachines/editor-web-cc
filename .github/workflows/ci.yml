@@ -318,7 +318,7 @@ jobs:
       - name: Run the value leg
         id: value
         if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
-        timeout-minutes: 10
+        timeout-minutes: 15
         continue-on-error: ${{ matrix.image == 'cc-debian13' }}
         run: bash deploy/ci/load.sh value
       - name: Check the memory readings and report the memory condition
@@ -371,8 +371,10 @@ jobs:
           def require_value_readings(memory):
               readings = require(memory, "value", lambda value: isinstance(value, dict),
                                  "load-memory.json")
-              for suffix in ("seed", "precheck", "baseline-1", "round-1",
-                             "baseline-2", "round-2"):
+              suffixes = ("seed", "precheck", "baseline-1", "round-1",
+                          *(f"{phase}-2-n{count}" for count in (1, 2, 4)
+                            for phase in ("baseline", "round")))
+              for suffix in suffixes:
                   phase = f"value-{suffix}"
                   reading = readings.get(phase)
                   if not isinstance(reading, dict):
@@ -391,22 +393,21 @@ jobs:
                       and all(isinstance(item, str) for item in value), label)
               for field in ("job_elapsed_s", "leg_elapsed_s"):
                   require(report, field, count, label)
+              expected = ((1, 4), (2, 1), (2, 2), (2, 4))
               rounds = require(report, "rounds", lambda value: isinstance(value, list)
-                               and len(value) == 2, label)
-              numbers = set()
-              for result in rounds:
-                  number = require(result, "round", lambda value: count(value)
-                                   and value in (1, 2), label)
-                  numbers.add(number)
-                  round_label = f"{label} round {number}"
+                               and len(value) == len(expected), label)
+              for result, (number, saves) in zip(rounds, expected):
+                  round_label = f"{label} round {number} with {saves} saves"
+                  require(result, "round", lambda value: count(value) and value == number,
+                          round_label)
+                  require(result, "count", lambda value: count(value) and value == saves,
+                          round_label)
                   require(result, "container_id", container_id, round_label)
                   for field in ("peak", "body_bytes", "mem_available_min_kib"):
                       require(result, field, count, round_label)
                   require(result, "run_statistic", lambda value: count(value)
                           or (type(value) is float and math.isfinite(value) and value >= 0),
                           round_label)
-              if numbers != {1, 2}:
-                  raise MissingValue("the results for both rounds")
 
 
           try:
@@ -434,9 +435,9 @@ jobs:
               sys.exit(1)
           print("CI load wrote all required JSON values.")
           PY
-      - name: Upload the JSON values of this leg
+      - name: Upload the load values and value diagnostics
         id: upload
-        if: ${{ !cancelled() && steps.values.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: load-${{ matrix.image }}
@@ -447,6 +448,11 @@ jobs:
             ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-flood.json
             ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-memory.json
             ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-value.json
+            ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-value-precheck-*.json
+            ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-value-answers-*.json
+            ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-memory-value-*-2-n*.json
+            ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-value-cpu-*.json
+            ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-value-app-*.log
       - name: Show load failure diagnostics
         id: diagnostics
         if: failure()

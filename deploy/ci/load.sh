@@ -57,7 +57,7 @@ PY
 
 recreate_app() {
   local deadline=$((SECONDS + 60))
-  compose up -d --no-deps --no-build --force-recreate app
+  compose up -d --no-deps --no-build --force-recreate app || return "$?"
   while (( SECONDS < deadline ))
   do
     if [[ $(compose exec -T proxy wget -q -T 3 -O - http://app:9000/readyz) == ok ]]; then
@@ -140,7 +140,7 @@ check_value_memory() {
   local phase
   local -a readings=()
   for phase in value-seed value-precheck value-baseline-1 value-round-1 \
-    value-baseline-2 value-round-2
+    value-baseline-2-n{1,2,4} value-round-2-n{1,2,4}
   do
     readings+=(--value "$phase=$CI_STATE/load-memory-$phase.json")
   done
@@ -151,6 +151,7 @@ seed_value() {
   date +%s >"$CI_STATE/load-value-leg-start"
   python3 -I -B "$GITHUB_WORKSPACE/deploy/ci/load_seed.py" value
   read_memory value-seed
+  value_client seed-extra
 }
 
 value_client() {
@@ -161,19 +162,27 @@ value_client() {
 }
 
 read_value_versions() {
-  local phase=$1 versions status
-  if versions=$(sql -q 2>/dev/null <<'SQL'
+  local phase=$1 versions status expected=5 label=five
+  if [[ $phase == 2-n* ]]; then
+    expected=8
+    label=eight
+  fi
+  if versions=$(sql -q -v "expected=$expected" 2>/dev/null <<'SQL'
 SELECT pg_catalog.json_build_object(
     'row_versions', pg_catalog.json_object_agg(r.reference_number, v.row_version)
 )
 FROM public.recipe_version v
 JOIN public.recipe r ON r.id = v.recipe_id
-WHERE r.reference_number IN ('LOAD-V1', 'LOAD-V2', 'LOAD-V3', 'LOAD-V4', 'LOAD-V5')
+WHERE (r.reference_number IN ('LOAD-V1', 'LOAD-V2', 'LOAD-V3', 'LOAD-V4', 'LOAD-V5')
+       OR (:expected = 8 AND r.reference_number IN ('LOAD-V6', 'LOAD-V7', 'LOAD-V8')))
   AND v.number = 1 AND v.status = 'draft' AND v.deleted_at IS NULL
-HAVING count(*) = 5;
+HAVING count(*) = :expected;
 SQL
   ); then
-    [[ -n $versions ]] || fail "expected five draft versions for value phase $phase"
+    if [[ -z $versions ]]; then
+      printf 'CI: expected %s draft versions for value phase %s\n' "$label" "$phase" >&2
+      return 1
+    fi
     printf '%s\n' "$versions" >"$CI_STATE/load-value-versions-$phase.json"
   else
     status=$?
@@ -199,19 +208,35 @@ print(anon)
 PY
 }
 
-value_round() {
-  local number=$1 anon client_status=0 reading_status=0
-  recreate_app
-  read_memory "value-baseline-$number"
-  anon=$(baseline_anon "$number")
+value_round() (
+  local number=$1 phase=$2 anon status=0 cpu_status=0 reading_status=0
+  shift 2
+  recreate_app || return "$?"
+  read_memory "value-baseline-$phase" || return "$?"
+  anon=$(baseline_anon "$phase") || return "$?"
+  cpu_cgroup "$APP_CGROUP" >"$CI_STATE/load-value-cpu-$phase-before.json" || return "$?"
   value_client round --round "$number" --cgroup "$APP_CGROUP" --reference-anon "$anon" \
-    --url https://localhost:8443 --cacert "$CI_STATE/root.crt" || client_status=$?
+    --url https://localhost:8443 --cacert "$CI_STATE/root.crt" "$@" || status=$?
   # Keep the round reading after a client failure. Return the first failure.
-  (read_memory "value-round-$number") || reading_status=$?
-  if (( client_status != 0 )); then
-    return "$client_status"
-  fi
+  cpu_cgroup "$APP_CGROUP" >"$CI_STATE/load-value-cpu-$phase-after.json" || cpu_status=$?
+  (read_memory "value-round-$phase") || reading_status=$?
+  (( status == 0 )) || return "$status"
+  (( cpu_status == 0 )) || return "$cpu_status"
   return "$reading_status"
+)
+
+save_value_log() {
+  compose logs app >"$CI_STATE/load-value-app-$1.log" 2>&1 ||
+    printf 'CI: could not save the app log for value phase %s\n' "$1" >&2
+}
+
+value_subround() {
+  local count=$1 phase=$2 status=0 version_status=0
+  value_round 2 "$phase" --count "$count" || status=$?
+  read_value_versions "$phase" || version_status=$?
+  (( status == 0 )) || return "$status"
+  (( version_status == 0 )) || return "$version_status"
+  value_client check-round --round 2 --count "$count"
 }
 
 value_precheck() {
@@ -225,8 +250,10 @@ value_precheck() {
   value_client check-precheck
 }
 
-run_value() {
-  local precheck_status=0 reading_status=0
+run_value() (
+  local precheck_status=0 reading_status=0 count status=0 subround_status first_failure
+  local value_phase=precheck
+  trap 'save_value_log "$value_phase"' EXIT
   (value_precheck) || precheck_status=$?
   # Keep the pre-check reading after a failure. Return the first failure.
   (read_memory value-precheck) || reading_status=$?
@@ -236,12 +263,30 @@ run_value() {
   if (( reading_status != 0 )); then
     return "$reading_status"
   fi
-  value_round 1
+  save_value_log "$value_phase"
+  value_phase=1
+  value_round 1 "$value_phase"
   read_value_versions 1
   value_client check-round --round 1
-  value_round 2
-  read_value_versions 2
-}
+  for count in 1 2 4
+  do
+    save_value_log "$value_phase"
+    value_phase=2-n$count
+    if value_subround "$count" "$value_phase"; then
+      continue
+    else
+      subround_status=$?
+    fi
+    if (( status == 0 )); then
+      status=$subround_status
+      first_failure=$value_phase
+    fi
+  done
+  if (( status != 0 )); then
+    printf 'CI: round %s failed with exit status %s.\n' "$first_failure" "$status" >&2
+  fi
+  return "$status"
+)
 
 case ${1:-all} in
   memory-timings) read_memory timings ;;
