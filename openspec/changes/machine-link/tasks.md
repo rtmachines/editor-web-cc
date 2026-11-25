@@ -1,0 +1,507 @@
+# Tasks
+
+Marks: `[opus]` is new normative text (Opus). `[sonnet]` is a Sonnet task. `[mechanical]` is copy work for Haiku. `[deploy]` is a Codex task in `deploy/`. Run every command from the root of the worktree `/home/rtm/editor-web-cc-machine-link`. Each task takes at most 2 hours.
+
+## Order and shared files
+
+- The owner made the decisions 1 to 16 of `design.md` on 2026-11-25. D1 to D14 apply them.
+- Implementation starts only after `value-body-memory-load` and change B end (decision 6). Rebase the branch on `main` first.
+- Task 1.1 takes the numbers of D14. Every later task uses the numbers of task 1.1.
+- Group 1 comes first, because the ADR and the documents are the authority of the code. Tasks 1.1 to 1.4 run in this order.
+- A test of the workspace compares some document rows with the code. Such a row goes into the task of its code, and that task writes the document first.
+- These rows are §1.2 of `reliability.md` (tasks 2.6 to 2.8), the cell `argon2.permits` of §7.11 (task 6.1), and the matrix of `api.md` §3.3 (task 6.11).
+- The SQL blocks of `data-model.md` §3 and §4 also belong here (tasks 4.1 to 4.4), because the document test compares them with the migration files.
+- These tasks copy the decided rows and columns of D6, D11, and D12 into the documents. They write no new normative text, so they keep `[sonnet]`.
+- Tasks 1.5, 1.6, and 1.7 share `domain-model.md`. Tasks 1.8 to 1.12 share `api.md`. Tasks 1.13 to 1.15 share `data-model.md`. Tasks 1.16 and 1.17 share `reliability.md`. Run the tasks of each file one after the other.
+- Tasks 1.19 and 1.20 share `CLAUDE.md` and `.claude/rules/`. Run them one after the other.
+- Group 2 comes before groups 3 to 7 and group 9, because they use the domain types and the error codes.
+- Tasks 2.6 to 2.9 share `error_codes.rs`, `reliability.md`, or the audit action list. Run them one after the other.
+- Group 3 defines the ports and the in-memory adapters. It comes before groups 5 and 6. Tasks 3.2 to 3.4 share the in-memory adapters. Run them one after the other.
+- Group 4 comes before group 5, because the adapters of `recipe-db` need the tables. Tasks 4.1 to 4.4 write the one migration file, `grants.expected`, and the two `deploy/pgtools/*.expected` files. Run them one after the other. Task 4.5 comes after 4.4.
+- Tasks 5.1 to 5.3 share the link store of `recipe-db`. Tasks 5.4 to 5.8 share the load request store. Run the tasks of each store one after the other. Task 5.11 comes after task 2.9.
+- Tasks 6.3 to 6.10 share `crates/recipe-app/src/machine_link.rs`. Run them one after the other. Task 6.12 comes after task 2.9.
+- Group 6 comes before group 7, because the handlers of group 7 call the use cases of group 6. Task 7.10 needs only group 3.
+- Tasks 7.1 to 7.9 change `crates/recipe-web/src/routes.rs`, `limits.rs`, and the adapter layers. Run them one after the other.
+- Tasks 7.10 to 7.21 change the session layer, the templates, `static/request-state.js`, `examples/dev_server.rs`, and both `.ftl` bundles. Run them one after the other.
+- Tasks 7.1 and 7.11 can both change `crates/recipe-web/src/session.rs`. Tasks 7.2 and 7.14 both change `crates/recipe-web/src/error/layer.rs`. Run 7.11 after 7.1, and 7.14 after 7.2.
+- Task 8.1 changes only `deploy/`. It can run in parallel to groups 2 to 7.
+- The browser suite runs against `examples/dev_server.rs` (ADR-0048), so tasks 9.2 to 9.4 need task 7.10 and not task 9.1.
+- Each browser task runs before the web task that makes it pass, so its first run fails:
+  - Task 9.4 runs after tasks 7.6 and 7.12 and before task 7.13.
+  - Task 9.2 runs after tasks 7.8 and 7.15 and before task 7.16.
+  - Task 9.3 runs after task 7.17 and before task 7.18.
+- Tasks 9.2 to 9.4 share `e2e/tests/machine-link.spec.ts`. They run one after the other in the order above.
+- Task 9.1 comes after groups 2 to 8.
+
+## 1. ADR and documents
+
+- [ ] 1.1 (docs/adr) [opus] Write the body of `docs/adr/NNNN-adapter-link.md` in the shape of ADR-0154, with the next free number (D14). Its status is "Proposed" until task 10.2.
+  - Write the Context, the owner decisions 1 to 16, and D1 to D12 of `design.md`. Name each rejected option with its reason.
+  - Take the next free A-number of `overview.md` §9 for A55. Replace ADR-0224 and A55 in this change with the final numbers.
+  - Red test: none, because the task writes no code.
+  - Check: `python -I tools/ste-lint/ste-lint.py docs/adr/NNNN-adapter-link.md` gives 0 hard violations.
+- [ ] 1.2 (docs/adr) [opus] Write the first amendment items of the new ADR. Give each item of D13 its new rule.
+  - The items are ADR-0013, ADR-0014, ADR-0015, ADR-0019, ADR-0020, ADR-0035, ADR-0037, and ADR-0051 (d), (e).
+  - ADR-0015: both tables are child rows of the machine, and `machine_link_state` comes before `load_request`. A load command takes `recipe` `FOR KEY SHARE`.
+  - ADR-0015 also states that `ReportLoadResult` takes no machine lock, with its reason, and names `MachineLinkStore` as the fifth write port.
+  - ADR-0051 (d), (e): `load_request`, the seven actions, the label of a load request, and the scope of `AuditViewRecipes` (D13).
+  - Red test: none, because the task writes no code.
+  - Check: `ste-lint.py` gives 0 hard violations on the file.
+- [ ] 1.3 (docs/adr) [opus] Write the other amendment items of the new ADR.
+  - The items are ADR-0053 (a), (b), ADR-0055 (a), ADR-0057 (b), ADR-0058 (g), ADR-0061 (e), and ADR-0065 (d).
+  - The other items are ADR-0109 (b), (m), (n), (o), (ae), ADR-0122, ADR-0154 (a), and ADR-0158.
+  - ADR-0053 (a): the field `path` of `E-LNK-009` and the two JSON examples of D4. ADR-0053 (b): an adapter route reads no cookie, so `message` is in `pl`.
+  - ADR-0057 (b): a panic that the inner panic layer catches gives `204` to a passive request (D10).
+  - ADR-0109 (o): the realm `RecipeAdapter realm="adapter"` of the adapter routes. ADR-0122: the permit and the bound of the pre-check of D7.
+  - Red test: none, because the task writes no code.
+  - Check: `grep -o 'ADR-0[0-9]*' docs/adr/NNNN-adapter-link.md | sort -u` holds each of the 18 ADRs of D13. `ste-lint.py` gives 0 hard violations on the file.
+- [ ] 1.4 (docs/adr) [sonnet] Copy "Amended by ADR-NNNN" into the Status line of each ADR of tasks 1.2 and 1.3. Add the index row to `docs/adr/README.md`.
+  - Add an entry "Also NNNN" with the amended rule to each topic of the decision map whose rule an amendment item of ADR-NNNN changes.
+  - These topics are at least "Export", "Pages of machines, units, and UDT types", "Permissions and approval", "Sessions, login, passwords, bootstrap", and "Concurrency".
+  - The other topics are "Audit, history, and security event pages", "Deployment, migrations, backup, panic policy, health", and "Frontend".
+  - In "Permissions and approval", replace "`ExportClient` with `VersionExport` only" with a text that also names `MachineLinkReport`.
+  - Red test: none, because the task writes no code.
+  - Check: `grep -l 'Amended by ADR-NNNN' docs/adr/*.md | wc -l` gives 18. `sed -n '/^## Decision map/,$p' docs/adr/README.md | grep -c 'NNNN'` gives at least 8.
+  - Check: `grep -c 'VersionExport. only' docs/adr/README.md` gives 0.
+- [ ] 1.5 (docs/architecture) [opus] Write the changed rows of `overview.md` and their copies in `domain-model.md` §8.
+  - `overview.md` §7: the rows R03 and R24 cite the new A-number and the new ADR. §9: add the A-row of D1, and change A24 and A45 as D2 and D9 state.
+  - `domain-model.md` §8: identical copies of the rows A24, A45, and the new A-row.
+  - Red test: none, because the task writes no code.
+  - Check: `diff <(grep '^| A24 ' docs/architecture/overview.md) <(grep '^| A24 ' docs/architecture/domain-model.md)` gives no output. Run it for A45 and the new row too.
+- [ ] 1.6 (docs/architecture) [opus] Write the new text of `domain-model.md` §2 and §7.
+  - §2: `MachineState`, `AdapterRunId`, `ReportSeq`, `LoadRequestId`, `LoadRequestState`, `LoadFailureReason`, `WrittenExtent` with `unknown`, and `VendorCode`.
+  - §7: the terms "status report", "link state", "stale", "load request", "lease", "lost claim", "release", and "adapter".
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.7 (docs/architecture) [opus] Write the new text of `domain-model.md` §3 and §5.
+  - §3: the invariants of D6. The row I13 names the cases without an entry of D7.
+  - §5: the five commands of D7 with the rule order table, the change of `ArchiveMachine`, the query, and the port row `MachineLinkStore`.
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.8 (docs/architecture) [opus] Write the changes of `api.md` §1, §2, and §3.
+  - §1: JSON also under `/adapter/v1/`. The path value `{request_id}` gives `404 E-LNK-004` on an adapter route and `404 E-WEB-005` on a UI route (decision 14).
+  - §2: the routes of D4 and D10. §3: the two permissions and the role mapping of D2. Task 6.11 writes the matrix rows of §3.3.
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.9 (docs/architecture) [opus] Write the changes of `api.md` §5.1, §5.3, and §9.
+  - §5.1: the row `E-WEB-006` with the read-only list of D9. §5.3: no `HX-*` header under `/adapter/v1/`.
+  - §9: the cap of 45 lines of `request-state.js` and the passive element of D10.
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.10 (docs/architecture) [opus] Write the changes of `api.md` §7.2, §7.3, §7.6, §7.7, and §8.
+  - §7.2: the passive request of D10, a `GET` of the two machine routes with both headers. §7.3: the CSRF and `Origin` exemption of the route class `Access::Adapter`.
+  - §7.6: the body limit `http.body_limit.adapter`. §7.7: the permit of D3 and the realm `RecipeAdapter`.
+  - §8: an adapter route reads no cookie, and `message` is in `pl` (D4).
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.11 (docs/architecture) [opus] Write `api.md` §10 "Adapter link", part 1: the contract.
+  - The routes, the layer order, and the JSON of D4 and D8, with `claim_lost`, `written` `unknown`, and the hash grammar.
+  - The JSON error body with `path`, the language of `message`, and the headers of `401`, `429`, and `503` (D4).
+  - The answer `404 E-LNK-004` of a malformed or unknown `{request_id}` (decision 14).
+  - The timing of D11. A restarted adapter sees its claim after up to `stale_after` plus one `report_interval`. Each sent report takes the next `seq`.
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.12 (docs/architecture) [opus] Write `api.md` §10, part 2: the duties of the adapter of D8 and D13.
+  - Before a write: §6.3 (check `loadable`, rebuild the hashed body, compare the SHA-256) and the compare of ADR-0109 (ah).
+  - Before `succeeded`: the read-back of every leaf of the v1 document. On `claim_lost`: stop every write of that request.
+  - After a restart: `failed`, `adapter_restarted`, and `unknown`, unless it read back the PLC. A claim answer that never came: `failed`, `machine_not_ready`, `none`, and no start.
+  - The interlock, one claim at a time per machine, and no write after a lost answer. The configuration binds each code to its PLC (decision 13).
+  - The adapter reads the connection record only before a load (ADR-0154 (jc)). It checks HTTPS and the certificate before it sends credentials.
+  - Three conformance cases: a skipped leaf, a changed body with the old hash field, and a correct hash with `loadable = false`. Each case names the result of a conforming adapter.
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.13 (docs/architecture) [opus] Write `data-model.md` §1.1, §1.2, §2, and §3 for the two tables.
+  - §1.1: the exception rows of D5 and D6. `machine_link_state` has no `id`, and `received_at` serves as `updated_at`. `load_request.id` has no default.
+  - §1.2: the names. §2: the two tables in the ERD.
+  - §3: the text of the two tables. Tasks 4.1 and 4.2 write their SQL blocks, with every `CHECK` and index. This includes the `CHECK` of `received_outcome`, `vendor_code`, `loaded_reference`, and `loaded_version`.
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.14 (docs/architecture) [opus] Write `data-model.md` §3.6, §4, §4.11, and §5.2.
+  - §3.6: the passive session statement of D10. It checks expiry, epoch, and account, and moves neither `last_seen_at` nor `expires_at`.
+  - §4: the text of the triggers of D6. They check the state pairs, the columns, and the lease, but no deadline. Tasks 4.3 and 4.4 write their SQL blocks. §4.11: the codes `E-LNK-030` to `E-LNK-037` in their check order.
+  - §5.2: the column grants. No identity column gets an `UPDATE` grant.
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.15 (docs/architecture) [opus] Write `data-model.md` §6 and §10.
+  - §6: the operations of D7 with their locks and the rule order table. The report sorts its entries by machine id once and runs each step in that order.
+  - §6 also: the insert with `ON CONFLICT (id) DO NOTHING`, the `GREATEST` rule of the lease and of `received_at`, and the lag of `now()`.
+  - §10: the seven audit actions, `aggregate_type`, and the full row in `before_state` and `after_state` of D7.
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.16 (docs/architecture) [opus] Write the changes of `reliability.md` §1.1, §2.4, and §4.2.
+  - §1.1: `LinkError` as the fifth enum of `recipe-domain`, and the block `E-LNK-030..049` in the trigger codes of the `StorageError` map.
+  - §2.4 rule 3: a panic that the inner panic layer catches gives `204` to a passive request (D10). Tasks 2.6 to 2.8 write the rows of §1.2.
+  - §4.2: the JSON body of an adapter route next to the form bodies.
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.17 (docs/architecture) [opus] Write the changes of `reliability.md` §7.8 and §7.11.
+  - §7.8: the read-only list of D9. §7.11: the values of D11. Task 6.1 writes the new split of `argon2.permits`.
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.18 (docs/architecture) [opus] Write the link panel in `design-system.md`.
+  - The status part, the terminal status part, the action part, and the icons of each state.
+  - The load form with the notice of a `Utf8` machine, the cancel form, and the release form.
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.19 (.claude, openspec) [opus] Write the new rules into `.claude/rules/openspec.md`, `openspec/config.yaml`, and `.claude/rules/web.md`.
+  - `openspec.md` and `config.yaml`: eight capabilities, with `machine-link` and its scope.
+  - `web.md`: the JSON routes under `/adapter/v1/`, the exemption of `Access::Adapter`, the guard of ADR-0055, and the read-only exceptions of D9.
+  - `web.md`: the passive poll, the cap of `request-state.js`, and the load, cancel, and release forms in the `hx-sync` form list.
+  - Red test: none, because the task writes no code.
+  - Check: `openspec validate --all --strict` passes. `grep -c 'adapter/v1' .claude/rules/web.md` gives at least 1.
+- [ ] 1.20 (CLAUDE.md, .claude) [opus] Write the new rules into `CLAUDE.md` and `.claude/rules/rust.md`.
+  - `CLAUDE.md` hard rules: the read-only list of D9 and the exceptions of D4 and D10.
+  - `CLAUDE.md` workspace map and `rust.md`: `LinkError` as the fifth error enum of `recipe-domain`.
+  - Red test: none, because the task writes no code.
+  - Check: `grep -c 'LinkError' CLAUDE.md .claude/rules/rust.md` gives at least 1 per file. The `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 1.21 (docs/ops) [sonnet] Write the how-to `docs/ops/adapter-account.md`.
+  - Create an `ExportClient` account for an adapter. Give it the plant CA. Open TCP port 443 from the adapter host.
+  - Before a reused machine code goes live, update the configuration of each adapter (decision 13).
+  - Before a restore, stop the adapters. After it, compare the adapter, the machine, and the database before the first claim. Cover a restore point before a claim and before a request.
+  - Roll back the code: stop the adapters and remove the container of `app`, as the runbook "Roll back on the newer schema" does. Then run the count query of the seven new actions through the `db` container.
+  - Roll back the image only with a count of 0, and keep the writers stopped until the previous image starts. Otherwise roll forward (decision 16). The `recipe-pgtools` image of the newer schema stays (ADR-0083 (c)).
+  - Red test: none, because the task writes no code.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+
+## 2. Domain types (recipe-domain)
+
+- [ ] 2.1 (recipe-domain) [sonnet] Add `Permission::MachineLinkReport` and `Permission::RecipeLoadRequest`, and the role mapping of D2 in `identity/role.rs`.
+  - Red test: a test requires `Role::ExportClient.permissions()` to hold exactly `VersionExport` and `MachineLinkReport`. It requires Administrator, ProcessEngineer, and Operator to hold `RecipeLoadRequest`, and the Operator to hold exactly three permissions.
+  - Check: `cargo test -p recipe-domain --all-features --locked role`.
+- [ ] 2.2 (recipe-domain) [sonnet] Add the module `machine_link` with `MachineState`, `AdapterRunId`, and `ReportSeq`, each with one `parse`.
+  - Red test: property tests of `parse`: every listed state parses, every other text fails, `seq` refuses a negative value and a value above `i64::MAX`.
+  - Check: `cargo test -p recipe-domain --all-features --locked machine_link`.
+- [ ] 2.3 (recipe-domain) [sonnet] Add `LoadRequestId`, `LoadRequestState` with the seven stored states, and the transition function of D6.
+  - Red test: a table test checks each of the 49 pairs of stored states against the table of D6. The lease is the pair `claimed` to `claimed`.
+  - Check: `cargo test -p recipe-domain --all-features --locked load_request`.
+- [ ] 2.4 (recipe-domain) [sonnet] Add `LoadFailureReason`, `WrittenExtent`, and `VendorCode`, each with one `parse`.
+  - Red test: `WrittenExtent::parse` accepts `none`, `partial`, `all`, and `unknown` and refuses every other text.
+  - Red test: `VendorCode::parse` refuses 4294967296 and -1. The parse of a reason from the adapter refuses `hash_mismatch`.
+  - Red test: the result `content_sha256` uses `export::Sha256`. A text of 63 digits or with `G` fails.
+  - Check: `cargo test -p recipe-domain --all-features --locked machine_link`.
+- [ ] 2.5 (recipe-domain) [sonnet] Add the effective state functions of D5 and D6 and the order of the last finished request.
+  - Red test: a row exactly `stale_after` old is stale and gives `no_link`. A row 1 second younger is fresh.
+  - Red test: `expired` and `unknown` start at their deadline and not 1 second before it.
+  - Red test: two finished requests and one lazy expiry give the expiry as the last one. A tie takes the later `requested_at`, then the higher id.
+  - Check: `cargo test -p recipe-domain --all-features --locked machine_link`.
+- [ ] 2.6 (recipe-domain, recipe-app, recipe-server, docs/architecture) [sonnet] Write the rows of `E-LNK-001` to `E-LNK-010` of D12 into `reliability.md` §1.2 first. Then add `LinkError` with `code()` and these variants.
+  - §1.2 also gets `LNK` in the CTX list with its ranges. `error_codes.rs` gets the same rows.
+  - Add the module `error_registry/link.rs` and its entry in `SCOPE` of `crates/recipe-server/tests/error_registry.rs`. Add `LinkError` to `ERROR_TYPES` of `crates/recipe-app/tests/error_types.rs`.
+  - Red test: the error code table test requires each of the 10 codes once and each variant to map to its row. It requires a `404` row for `E-LNK-004`.
+  - Red test: the registry test of `recipe-server` fails while `LinkError` is not in `SCOPE`. The error type test of `recipe-app` fails while `LinkError` is not in `ERROR_TYPES`.
+  - Check: `cargo test -p recipe-domain --all-features --locked error_codes`, `cargo test -p recipe-server --all-features --locked error_registry`, and `cargo test -p recipe-app --all-features --locked error_types`.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 2.7 (recipe-domain, recipe-server, docs/architecture) [sonnet] Write the rows of `E-LNK-012` to `E-LNK-018` of D12 into `reliability.md` §1.2 first. Then add these variants to `LinkError` and the rows to `error_codes.rs`.
+  - The rows `E-LNK-012` and `E-LNK-016` have the HTTP column `-`.
+  - Red test: the error code table test requires each of the 17 codes once and no row for `E-LNK-011`. The registry test requires a sample of each new variant.
+  - Red test: the rows `E-LNK-012` and `E-LNK-016` have the HTTP column `-`, and the tests that skip `-` pass with them.
+  - Check: `cargo test -p recipe-domain --all-features --locked error_codes` and `cargo test -p recipe-server --all-features --locked error_registry`.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 2.8 (recipe-domain, recipe-db, docs/architecture) [sonnet] Write the rows of the trigger codes `E-LNK-030` to `E-LNK-037` of D12 into `reliability.md` §1.2 first. Then add them to `error_codes.rs`.
+  - Add the eight codes to `TRIGGER_CODES` of `crates/recipe-db/src/trigger_messages/tests.rs` and to `user_message` when it needs them.
+  - Red test: the error code table test requires each of the eight trigger codes once, with its own row and the status of D12.
+  - Red test: the trigger message test of `recipe-db` fails while `TRIGGER_CODES` lacks the eight codes.
+  - Check: `cargo test -p recipe-domain --all-features --locked error_codes` and `cargo test -p recipe-db --all-features --locked trigger_codes`.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 2.9 (recipe-domain) [mechanical] Add the seven `AuditAction` variants of D7 to `AuditAction::ALL`, and the entity type `load_request` to `audit/target.rs`.
+  - Red test: the entity type test requires the text `load_request`.
+  - Red test: a test requires exactly the names `RecipeLoadRequested`, `RecipeLoadExpired`, `RecipeLoadCancelled`, `RecipeLoadReleased`, `RecipeLoadClaimed`, `RecipeLoadSucceeded`, and `RecipeLoadFailed`. It also requires their text forms. It fails before the variants exist.
+  - Check: `cargo test -p recipe-domain --all-features --locked audit`.
+
+## 3. Ports and in-memory adapters (recipe-app)
+
+- [ ] 3.1 (recipe-app) [sonnet] Define the port traits of D5 to D7 and D10.
+  - The ports are `MachineLinkStore`, the load request methods of the `UnitOfWork`, and the passive method of the session port.
+  - The read port of `GetMachineLink` also reads a load request by its id.
+  - Red test: a test of `recipe-app` calls each port method through a stub and fails to compile before the traits exist.
+  - Check: `cargo test -p recipe-app --all-features --locked machine_link_ports`.
+- [ ] 3.2 (recipe-app) [sonnet] Add the in-memory adapter of `MachineLinkStore` for the tests of `recipe-app` and of `recipe-web`.
+  - Red test: contract tests run against the in-memory adapter. They cover the `seq` rule, the run rule at the stale limit, the `GREATEST` lease, and `claim_lost`.
+  - Check: `cargo test -p recipe-app --all-features --locked machine_link_memory_store`.
+- [ ] 3.3 (recipe-app) [sonnet] Add the in-memory load request methods of the `UnitOfWork` and the in-memory read port, with the read by id.
+  - Red test: contract tests cover the partial unique rule, the insert with a known id, and the journal of the transaction. They also cover the last finished request of D6.
+  - Check: `cargo test -p recipe-app --all-features --locked machine_link_memory_requests`.
+- [ ] 3.4 (recipe-app) [sonnet] Add the passive method to the in-memory session adapter.
+  - Red test: the passive method refuses an expired session, an old epoch, and an inactive account, and moves no time.
+  - Check: `cargo test -p recipe-app --all-features --locked machine_link_memory_session`.
+
+## 4. Migration (recipe-db)
+
+- [ ] 4.1 (recipe-db, docs/architecture) [sonnet] Write the SQL block of `machine_link_state` into `data-model.md` §3 first. Then write the migration of the table with its checks and grants. Update `grants.expected`, `deploy/pgtools/restore-code.expected`, and `restore-roles.expected` (ADR-0103 (m)).
+  - Red test: one test per `CHECK`, the foreign key, and the grant test of ADR-0069 (q). They fail before the migration exists. `restore_code.rs` and `restore_roles.rs` pass.
+  - Red test: a `loaded_reference` outside the pattern of `recipe_reference_format` and a `loaded_version` of 0 each violate their `CHECK`.
+  - Check: `cargo test -p recipe-db --all-features --locked machine_link_state` and `cargo test -p recipe-db --all-features --locked restore_`.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 4.2 (recipe-db, docs/architecture) [sonnet] Write the SQL block of `load_request` into `data-model.md` §3 first. Then add the table of D6 to the same migration file. Add its indexes, the partial unique index, the column grants, and the `CHECK` constraints. Update the three expected files.
+  - Red test: a second active row gives `23505`. Each `CHECK` and each foreign key has a test that violates it. `recipe_app` has no `DELETE`.
+  - Red test: an update of `recipe_version_id` by `recipe_app` gives `42501`. The `CHECK` permits `hash_mismatch` in `reason` and `unknown` in `written`. A hash of 63 digits fails.
+  - Red test: a `received_outcome` other than `succeeded` or `failed`, and a `vendor_code` of -1 or 4294967296, each violate their `CHECK`.
+  - Check: `cargo test -p recipe-db --all-features --locked load_request` and `cargo test -p recipe-db --all-features --locked restore_`.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 4.3 (recipe-db, docs/architecture) [sonnet] Write the SQL block of `load_request_insert` into `data-model.md` §4 first. Then add the trigger and its codes `E-LNK-031` and `E-LNK-032`. Update `restore-code.expected`.
+  - Red test: an insert in the state `succeeded`, with `claimed_by`, with `released_at`, or of a foreign version gives its code. The SQLSTATE is `23514`. A valid insert passes.
+  - Red test: an insert that breaks both rules gives `E-LNK-031`.
+  - Check: `cargo test -p recipe-db --all-features --locked load_request_insert`.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 4.4 (recipe-db, docs/architecture) [sonnet] Write the SQL block of `load_request_transition` into `data-model.md` §4 first. Then add the trigger and its codes `E-LNK-030` and `E-LNK-033` to `E-LNK-037`. Update `restore-code.expected`.
+  - Red test: a positive test per legal transition and for the lease. A negative test per illegal transition and per rule asserts the SQLSTATE and the trigger code.
+  - Red test: a change of an identity column by the table owner gives `E-LNK-033`. A change of `claimed_by` gives `E-LNK-037`. An update that breaks two rules gives the first code of the D12 order.
+  - Red test: a release with `released_at` and without `released_by` gives `E-LNK-034`. A late result that changes `released_at` gives `E-LNK-037`.
+  - Red test: an update of a `claimed` row that sets `released_at` and keeps the state gives `E-LNK-034`.
+  - Red test: a result after `result_deadline` passes, because the trigger checks no deadline (D6).
+  - Check: `cargo test -p recipe-db --all-features --locked load_request_transition`.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 4.5 (recipe-db) [sonnet] Add the prefix `E-LNK-` to the trigger code map of `crates/recipe-db/src/error.rs`.
+  - Red test: a `succeeded` row without its hash gives SQLSTATE `23514`, the code `E-LNK-035` in the database, and `StorageError` with `E-LNK-035`. It fails while the map gives `E-DB-003`.
+  - Check: `cargo test -p recipe-db --all-features --locked trigger_code`.
+
+## 5. Adapters (recipe-db)
+
+- [ ] 5.1 (recipe-db) [sonnet] Implement `MachineLinkStore::record` in one short transaction with the lock order of D7.
+  - The report sorts its entries by machine id once. It locks each `machine` `FOR SHARE`, runs each upsert, then each lease update, each step in that order.
+  - Red test: two reports in reverse order run on two connections. A barrier holds the first report between its two upserts. Both reports end without a deadlock.
+  - Check: `cargo test -p recipe-db --all-features --locked machine_link_store_locks`.
+- [ ] 5.2 (recipe-db) [sonnet] Add the `seq` rule, the run rule, and `received_at = GREATEST(received_at, now())` of D5 to `MachineLinkStore::record`.
+  - Red test: the runs `A/50`, then `B/0` within `stale_after`, give `E-LNK-016`. `A/50`, then `B/0` on a row 30 seconds old, then `A/51` keep the row of `B`.
+  - Red test: a report that waits on the lock of a later report does not move `received_at` back.
+  - Check: `cargo test -p recipe-db --all-features --locked machine_link_store_rules`.
+- [ ] 5.3 (recipe-db) [sonnet] Add the lease and `claim_lost` of D4 and D6 to `MachineLinkStore::record`.
+  - Red test: a report that started before a parallel lease and gets the lock after it applies, and the `result_deadline` does not move back.
+  - Red test: a `claim` of a `released` request, of a missing id, and of another account gives `claim_lost` and no lease.
+  - Red test: an entry that gets `E-LNK-012` or `E-LNK-016` still gives `claim_lost` and writes no row.
+  - Red test: a failed write leaves no entry applied. The audit log gets no row.
+  - Check: `cargo test -p recipe-db --all-features --locked machine_link_store_lease`.
+- [ ] 5.4 (recipe-db) [sonnet] Implement the store of `RequestRecipeLoad`, with the locks of D7 and the insert with `ON CONFLICT (id) DO NOTHING`.
+  - Add the read of a load request by id in `READ COMMITTED READ ONLY` for the step before the pre-check (D7).
+  - Red test: the read by id gives the stored row and `None` for an unknown id, and it takes no row lock.
+  - Red test: the operation fails at its audit insert and leaves no partial write (`reliability.md` §6).
+  - Red test: two parallel inserts with one id for one machine give one row. For two machines, they give one row, `E-LNK-018`, and one `RecipeLoadRequested` entry.
+  - Check: `cargo test -p recipe-db --all-features --locked load_request_store_request`.
+- [ ] 5.5 (recipe-db) [sonnet] Implement the store of `CancelRecipeLoad` and `ReleaseRecipeLoad`, with the locks of D7 and the columns `released_at` and `released_by`.
+  - Red test: each operation fails at its audit insert and leaves no partial write. A cancel and a claim on two connections change the row once.
+  - Red test: a late result after a release keeps `released_at` and `released_by`.
+  - Check: `cargo test -p recipe-db --all-features --locked load_request_store_person`.
+- [ ] 5.6 (recipe-db) [sonnet] Implement the store of `ClaimLoadRequest`, with the locks of D7.
+  - Red test: the operation fails at its audit insert and leaves no partial write. A claim waits for a parallel `RetireVersion` and then sees the new state.
+  - Red test: a claim that starts 0.5 seconds before the claim deadline and waits on a lock until 0.5 seconds after it stores `claimed`. The wait stays below `db.lock_timeout`.
+  - Check: `cargo test -p recipe-db --all-features --locked load_request_store_claim`.
+- [ ] 5.7 (recipe-db) [sonnet] Implement the store of `ReportLoadResult`, with the lock of D7 and the received body of D6.
+  - Red test: the operation fails at its audit insert and leaves no partial write. The row keeps the parsed received body next to the stored outcome.
+  - Red test: a result does not wait for a held `machine` lock, because it takes none.
+  - Check: `cargo test -p recipe-db --all-features --locked load_request_store_result`.
+- [ ] 5.8 (recipe-db) [sonnet] Extend the store of `ArchiveMachine` with the `load_request` lock and the expiry of D7.
+  - Red test: an archive with a `claimed` or `unknown` request gives `E-LNK-003` and changes nothing.
+  - Red test: a live `pending` request gives `cancelled` with `RecipeLoadCancelled` and `MachineArchived` in one commit. An overdue one gives `expired` with `RecipeLoadExpired` and `MachineArchived`.
+  - Red test: a failed audit insert, with a live and with an overdue `pending` request, leaves the machine live and the request `pending`.
+  - Check: `cargo test -p recipe-db --all-features --locked archive_machine`.
+- [ ] 5.9 (recipe-db) [sonnet] Implement the read of `GetMachineLink` as one statement in `READ COMMITTED READ ONLY`.
+  - Red test: the read gives the row, the active request, the last finished request of D6, and the approved hash of the loaded recipe.
+  - Red test: a late result of an older request after a newer active request gives both requests. Two finished requests and one lazy expiry give the expiry as the last one.
+  - Check: `cargo test -p recipe-db --all-features --locked machine_link_read`.
+- [ ] 5.10 (recipe-db) [sonnet] Implement the passive method of the session store with the statement of `data-model.md` §3.6.
+  - Red test: a passive check of a valid session changes neither `last_seen_at` nor `expires_at`.
+  - Red test: an expired session, an old epoch, and an inactive account give the same refusal as the normal statement.
+  - Check: `cargo test -p recipe-db --all-features --locked session_passive`.
+
+- [ ] 5.11 (recipe-db) [sonnet] Let the audit reads of `audit_reads.rs` read the entries of a load request.
+  - Red test: a stored `RecipeLoadClaimed` entry with the entity type `load_request` reads back with its action, its entity type, and both states. It fails while the read reports a corrupt row.
+  - Check: `cargo test -p recipe-db --all-features --locked audit_reads`.
+
+## 6. Use cases (recipe-app)
+
+- [ ] 6.1 (recipe-app, docs/architecture) [sonnet] Write the new split of `argon2.permits` into `reliability.md` §7.11 first. Then give the Basic check a permit pool argument.
+  - The adapter routes use `adapter.basic_permits`, and `argon2.permits` keeps 2 for the UI logins (D3). The hasher test reads the cell of §7.11.
+  - Red test: a barrier holds the first hash of the adapter pool. A second check of the adapter pool then gives `Timeout`, and a check of the export pool and two UI logins get their permits.
+  - Red test: after the barrier opens, each pool gives its permit back.
+  - Check: `cargo test -p recipe-app --all-features --locked basic_permit`.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+- [ ] 6.2 (recipe-app) [sonnet] Implement the query `GetMachineLink` with `RecipeView` as its first statement and the effective states of D5 and D6.
+  - Red test: a role without `RecipeView` gets `Forbidden` before a read. A row exactly `stale_after` old gives `no_link`. A `claimed` request after its deadline gives `unknown`.
+  - Check: `cargo test -p recipe-app --all-features --locked get_machine_link`.
+- [ ] 6.3 (recipe-app) [sonnet] Implement `ReportMachineState` with the entry results of D4.
+  - Red test: permission first, an unknown code, an archived machine, a stale `seq`, a second run, and the fields `pending`, `claimed`, and `claim_lost`.
+  - Red test: an old process names a `released` request after a new claim. Its entry gets `claim_lost`, and the new claim keeps its deadline.
+  - Red test: an old run names a `released` request while the row of the new run is fresh. Its entry gets `E-LNK-016` and `claim_lost`, and the stored row does not change. An entry with `E-LNK-012` also holds `claim_lost`. An entry with `E-PLT-010` holds none.
+  - Check: `cargo test -p recipe-app --all-features --locked report_machine_state`.
+- [ ] 6.4 (recipe-app) [sonnet] Implement the pre-check of `RequestRecipeLoad` (decision 11).
+  - Red test: the journal of the in-memory `UnitOfWork` shows the `loadable` check before the start of the transaction.
+  - Red test: a busy `export.permits` gate gives the error of `503 E-WEB-009` and an empty journal. A version of a `Utf8` machine gives `E-LNK-015` and no request.
+  - Red test: a known id while every export permit is held gives the stored request and takes no permit. A known id with another version gives `E-LNK-018`.
+  - Check: `cargo test -p recipe-app --all-features --locked request_recipe_load_check`.
+- [ ] 6.5 (recipe-app) [sonnet] Implement the rule order of `RequestRecipeLoad` (D7).
+  - Red test: each rule of the table in order, and the retry with the same id and its stored state.
+  - Red test: an id with another version gives `E-LNK-018`. An `unknown` request gives `E-LNK-003`.
+  - Red test: a conflict of the insert gives the answer of rule 1 or 2 and rolls back the `RecipeLoadExpired` write.
+  - Red test: an overdue request gives `RecipeLoadExpired` with both full rows and `RecipeLoadRequested` with only `after_state`, in one commit.
+  - Check: `cargo test -p recipe-app --all-features --locked request_recipe_load`.
+- [ ] 6.6 (recipe-app) [sonnet] Implement `CancelRecipeLoad` with the rules of D7.
+  - Red test: a successful cancel, a cancel of a `claimed` request, and a cancel after the claim deadline.
+  - Red test: a repeated cancel with no audit entry, and a request of another machine.
+  - Red test: the command result holds the active request of the machine after the change (D10).
+  - Check: `cargo test -p recipe-app --all-features --locked cancel_recipe_load`.
+- [ ] 6.7 (recipe-app) [sonnet] Implement `ReleaseRecipeLoad` with the rules of D7.
+  - Red test: a release of an `unknown` request, a release before the result deadline, a repeated release, and a request of another machine.
+  - Red test: the `RecipeLoadReleased` entry holds the full `claimed` row and the full `released` row with the release time and the actor.
+  - Red test: a release, a lost answer, a late result, and a repeated release with a newer `pending` request give success and no entry.
+  - Check: `cargo test -p recipe-app --all-features --locked release_recipe_load`.
+- [ ] 6.8 (recipe-app) [sonnet] Implement `ClaimLoadRequest` with the rules of D7.
+  - Red test: a claim at the deadline, a claim of a retired version, and a request claimed by another account.
+  - Red test: a version with `loadable = false` gets `claimed`, and the journal shows no export permit (decision 11).
+  - Red test: a repeated claim after the deadline gives `200` and no audit entry.
+  - Check: `cargo test -p recipe-app --all-features --locked claim_load_request`.
+- [ ] 6.9 (recipe-app) [sonnet] Implement `ReportLoadResult` with the rules of D7 and D8.
+  - Red test: another account, a never claimed request, a late result after a release, and a late result on an archived machine.
+  - Red test: `hash_mismatch` stores `failed` and `written` `all`. Its entry holds the full `claimed` row and the received hash.
+  - Red test: a repeated result, a different second result, two different wrong hashes, and `written` `unknown`.
+  - Check: `cargo test -p recipe-app --all-features --locked report_load_result`.
+- [ ] 6.10 (recipe-app) [sonnet] Extend `ArchiveMachine` with the active request rule of D7.
+  - Red test: a `claimed` or `unknown` request gives `E-LNK-003`. A live `pending` request gives `RecipeLoadCancelled` and `MachineArchived` in one commit, with the actor of the archive. An overdue `pending` request gives `RecipeLoadExpired` and `MachineArchived` in one commit.
+  - Check: `cargo test -p recipe-app --all-features --locked archive_machine`.
+- [ ] 6.11 (recipe-app, docs/architecture) [sonnet] Write the matrix rows of the new use cases into `api.md` §3.3 first. Then add the rows of the generated permission matrix test and the `runs_in_read_only` row of each new use case (D9).
+  - The test of `matrix_doc.rs` compares §3.3 with the operation catalog.
+  - Red test: the matrix holds each new use case with its permission. `ReportMachineState`, `ReportLoadResult`, and `GetMachineLink` run in read-only mode. The other four do not.
+  - Check: `cargo test -p recipe-app --all-features --locked matrix`.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` gives 0 hard violations.
+
+- [ ] 6.12 (recipe-app) [sonnet] Add `AuditEntityType::LoadRequest` to the filter of `ListAuditEntries` (ADR-0051 (d)).
+  - Red test: an Administrator with the filter `load_request` gets the entries of a load request. A role with only `AuditViewRecipes` gets an empty list.
+  - Check: `cargo test -p recipe-app --all-features --locked audit_entity_type`.
+
+## 7. HTTP and UI (recipe-web)
+
+- [ ] 7.1 (recipe-web) [sonnet] Add the route class `Access::Adapter(Operation)` and the CSRF and `Origin` exemption by that class (D4).
+  - Red test: a test lists every route. Each person route without a token gives `403 E-WEB-007`. `POST /adapter/v1x/reports` is not exempt.
+  - Red test: `POST /adapter/v1/../users/mhoffman/deactivate` and its encoded forms (`%2e%2e`, `%2F`) reach no handler.
+  - Check: `cargo test -p recipe-web --all-features --locked adapter_access`.
+- [ ] 7.2 (recipe-web) [sonnet] Let every layer under `/adapter/v1/` answer the JSON error body of D4.
+  - Red test: the guard, the Basic check, the timeout, the A24 gate, and the handler answer JSON with no `HX-*` header. The backstop panic layer answers `text/plain`.
+  - Red test: `path` is present only with `E-LNK-009`. `message` is in `pl`, also with the cookie `recipe_lang=en`. A `401` has the realm `RecipeAdapter`. A `429` and a `503` have `Retry-After`.
+  - Red test: pool exhaustion gives `503 E-DB-004`, and an unexpected SQLSTATE gives `500 E-DB-008`.
+  - Check: `cargo test -p recipe-web --all-features --locked adapter_errors`.
+- [ ] 7.3 (recipe-web) [sonnet] Add the rows of the adapter routes to `route_limit` in `limits.rs` and the JSON extractor with `http.body_limit.adapter` and `E-LNK-009`.
+  - Red test: an announced body above 64 KiB gives `413` before any hash. A chunked body above 64 KiB gives `413` in the handler.
+  - Red test: a report of 100 KiB gives `413 E-WEB-003`, so the adapter limit applies and not the form limit. A valid report of 32 entries below 64 KiB applies.
+  - Red test: a form body, `charset=utf-8`, a syntax error, an unknown field with its parent path, and a claim body other than `{}`.
+  - Red test: a wrong Basic password with a JSON syntax error gives `401`.
+  - Check: `cargo test -p recipe-web --all-features --locked adapter_body`.
+- [ ] 7.4 (recipe-web) [sonnet] Add the JSON Schema files of D4 and D8 and their golden tests.
+  - Red test: each example passes its schema. The result schema refuses `hash_mismatch` and a hash of 63 digits. It accepts `written` `unknown`.
+  - Red test: the `document` path of each answer example is the Basic route `/export/v1/machines/{code}/recipes/{ref}/approved` of `api.md` §2.7.
+  - Check: `cargo test -p recipe-web --all-features --locked adapter_schema`.
+- [ ] 7.5 (recipe-web) [sonnet] Add the three conformance fixtures of `api.md` §10 to the golden tests.
+  - Each fixture holds a v1 document, the evidence of the case, and the expected result body of a conforming adapter. The cases are a skipped leaf with its read-back, a changed body with the old hash field, and `loadable = false`.
+  - Red test: each result body passes the result schema and equals the expected result of `api.md` §10 for its case. The hash of `recipe-domain` shows that the changed body does not match its hash field.
+  - Red test: a copy of each fixture with the result `succeeded` fails the test.
+  - Check: `cargo test -p recipe-web --all-features --locked adapter_conformance`.
+- [ ] 7.6 (recipe-web) [sonnet] Add `POST /adapter/v1/reports` with the guard of ADR-0055 and the Basic check of the adapter pool.
+  - Red test: no header, a cross-site request, `HX-Request: true` with `HX-Target: machine-link-panel`, a person account, and a valid report of two machines with one hash.
+  - Red test: an empty list, a repeated code, and a list above `machine_link.report_max_machines` give `422 E-LNK-010` and store nothing.
+  - Red test: an `ExportClient` export still works, and a report during a held export permit applies.
+  - Check: `cargo test -p recipe-web --all-features --locked adapter_reports`.
+- [ ] 7.7 (recipe-web) [sonnet] Add the claim route `POST /adapter/v1/load-requests/{request_id}/claim` and its error answers.
+  - Red test: each status of the claim rules of D7 and D12 as JSON. A malformed and an unknown `{request_id}` give `404 E-LNK-004`.
+  - Red test: the XSS payload corpus and a synthetic secret in an extra field give `422` with no echo in the answer and the log.
+  - Check: `cargo test -p recipe-web --all-features --locked adapter_claim`.
+- [ ] 7.8 (recipe-web) [sonnet] Add the result route `POST /adapter/v1/load-requests/{request_id}/result` and its error answers.
+  - Red test: each status of the result rules of D7, D8, and D12 as JSON. A malformed and an unknown `{request_id}` give `404 E-LNK-004`.
+  - Red test: a result hash of 63 digits or with `G` gives `422` with `$.content_sha256` and stores nothing. A trigger code `E-LNK-035` gives `422`.
+  - Red test: the XSS payload corpus in an extra field gives `422` with no echo in the answer and the log.
+  - Check: `cargo test -p recipe-web --all-features --locked adapter_result`.
+- [ ] 7.9 (recipe-web) [sonnet] Add the read-only rules of D9 to the gate layer.
+  - Red test: in read-only mode, a claim gives `503 E-WEB-006` as JSON, and the hash counter of the Basic check stays at 0.
+  - Red test: the three person commands give `503 E-WEB-006`. The report with its lease and the result apply.
+  - Check: `cargo test -p recipe-web --all-features --locked gates`.
+- [ ] 7.10 (recipe-web) [sonnet] Wire the in-memory adapters of the link into `examples/dev_server.rs`, with one seeded machine and an adapter account.
+  - Red test: the dev server test finds the seeded machine `M12` and the adapter account `plc-m12` in the in-memory stores. It fails before the seed exists.
+  - Check: `cargo test -p recipe-web --all-features --locked dev_server`.
+- [ ] 7.11 (recipe-web) [sonnet] Add the passive request of D10 to the session layer, with the passive method of the session port.
+  - Red test: with a test clock, a session with only passive requests ends after `session.idle_timeout` and gets `HX-Redirect: /login`. A request that is not passive renews the session.
+  - Red test: a form `POST` and a `GET` of another route with both headers renew the session.
+  - Check: `cargo test -p recipe-web --all-features --locked passive_request`.
+- [ ] 7.12 (recipe-web) [sonnet] Add the status part of the link panel to the machine page.
+  - Red test: the panel states of the `web-ui` delta, no state by color alone, and the hidden input `machine_id`.
+  - Red test: a template test requires a literal in each `hx-*` attribute and `every 5s` equal to `ui.link_poll_interval`. An archived machine page has no panel.
+  - Check: `cargo test -p recipe-web --all-features --locked machine_link_panel`.
+- [ ] 7.13 (recipe-web) [sonnet] Add the `HX-Target` branch of D10 to `GET /machines/{code}` and `GET /machines/by-id/{uuid}`.
+  - Red test: each route with a live machine and its `machine_id` gives the status part.
+  - Red test: on each route, an archived machine, a missing machine, and a missing, malformed, or other `machine_id` give `200` with the terminal status part. It has no `hx-get` and no `hx-trigger`.
+  - Check: `cargo test -p recipe-web --all-features --locked machine_link_poll`.
+  - Check: `cd e2e && npm ci && npm test -- machine-link`, with `E2E_PASSWORD` exported. The cases of task 9.4 pass.
+- [ ] 7.14 (recipe-web) [sonnet] Give a failed passive request the answer `204`.
+  - Red test: a poll during a database outage and a poll with a handler panic each give `204`. `E-WEB-004` keeps `HX-Redirect: /login`.
+  - Check: `cargo test -p recipe-web --all-features --locked passive_error`.
+- [ ] 7.15 (recipe-web, e2e) [sonnet] Change `static/request-state.js` as D10 states, within 45 lines.
+  - The script reads `event.detail.elt`. This is the requesting element only because the status part has `hx-target="this"`. It checks `data-passive` first in `htmx:beforeRequest`. In `htmx:beforeSwap`, it drops an answer of 400 or higher to a passive element.
+  - Red test: a template test requires `hx-target="this"` on the status part.
+  - Red test: a browser case sends a poll answer `502` with `HX-Retarget: #error-panel`, as the proxy does. The status part, `#error-panel`, and `#toast` do not change.
+  - Red test: a browser case aborts a poll with a network error. The page shows no `E-WEB-015`. Both cases fail before the change.
+  - Check: `cargo test -p recipe-web --all-features --locked static_scripts` and `cd e2e && npm ci && npm test -- request-state-passive`.
+- [ ] 7.16 (recipe-web) [sonnet] Add the load form of the version page with the field `load_request_id` (D10).
+  - Red test: the form only on a loadable `Approved` version of a live machine. No form on an archived machine and on a version with `loadable = false`. A `Utf8` machine gets the notice.
+  - Red test: a template test requires `hx-sync`, no `hx-disabled-elt`, `hx-target="#version-load"`, and `hx-swap="outerHTML"`.
+  - Check: `cargo test -p recipe-web --all-features --locked load_form`.
+- [ ] 7.17 (recipe-web) [sonnet] Add `POST /recipes/{ref}/versions/{n}/load` and its answers (D10).
+  - Red test: the error fragment of `E-LNK-002`, and a busy export gate with `503 E-WEB-009`.
+  - Red test: a success gives the fragment and a fresh form with a new `load_request_id`. A known id of a `succeeded` request names `succeeded`. Without HTMX, the answer is `303`.
+  - Check: `cargo test -p recipe-web --all-features --locked load_route`.
+  - Check: `cd e2e && npm ci && npm test -- machine-link`, with `E2E_PASSWORD` exported. The cases of tasks 9.4 and 9.2 pass.
+- [ ] 7.18 (recipe-web) [sonnet] Add the action part with the cancel and release forms to the machine page.
+  - Red test: a template test requires `hx-push-url="false"`, `hx-target`, `hx-swap`, `hx-sync`, and no `hx-disabled-elt` on both forms.
+  - Red test: a person without the permission sees no form. An old action part has no release form. Outside read-only mode, a poll that shows `unknown` then shows the hint to reload the page.
+  - Check: `cargo test -p recipe-web --all-features --locked link_actions_part`.
+- [ ] 7.19 (recipe-web) [sonnet] Add the cancel and release routes with the path value `{request_id}` and their answers.
+  - Red test: a malformed id and a request of another machine give `404 E-WEB-005`. Without HTMX, the answer is `303` to `/machines/{code}`.
+  - Red test: a success gives a fresh action part from the command result, also when a read port fails after the commit.
+  - Check: `cargo test -p recipe-web --all-features --locked link_actions_routes`.
+  - Check: `cd e2e && npm ci && npm test -- machine-link`, with `E2E_PASSWORD` exported. Every case of the spec passes.
+- [ ] 7.20 (recipe-web) [sonnet] Add the texts to the bundles `pl` and `en`, with the words of each reason and of each `written` value. Add the read-only rules of the three forms.
+  - Red test: the bundle key test, and the panel test of a failed request with a vendor code and with `written` `unknown`.
+  - Red test: the read-only page test shows no form and no hint to reload the page.
+  - Check: `cargo test -p recipe-web --all-features --locked i18n` and `cargo test -p recipe-web --all-features --locked read_only`.
+- [ ] 7.21 (recipe-web) [sonnet] Add `load_request` and the seven actions to the audit pages of ADR-0051 (d), (e).
+  - The pages are the audit filters, the selects, the entry page, and both bundles.
+  - Red test: the Administrator gets `load_request` and `RecipeLoadClaimed` in the selects. The entry page labels the object with the code, the reference, and the version.
+  - Red test: a ProcessEngineer gets no `load_request` in the select and no load request entry in the list.
+  - Check: `cargo test -p recipe-web --all-features --locked audit_pages`.
+
+## 8. Proxy (deploy)
+
+- [ ] 8.1 (deploy) [deploy] Extend the plain HTTP matcher of both Caddyfiles to `/export/*` and `/adapter/*` with `respond 403`. Add the Compose CI check.
+  - Red test: the Compose CI check sends `POST http://…/adapter/v1/reports` and requires `403` without `Location`. It fails before the matcher changes.
+  - Check: the Compose CI job of `deploy/` passes.
+
+## 9. Wiring and browser tests
+
+- [ ] 9.1 (recipe-server) [sonnet] Wire the new store, the use cases, the passive session method, and the two permit pools.
+  - Red test: a startup test holds an export check and an adapter check inside their hashes, after each got its Argon2 permit. Two UI logins then get their permits, and a third login waits.
+  - Check: `cargo test -p recipe-server --all-features --locked wiring`.
+- [ ] 9.2 (e2e) [sonnet] Add the load flow to `e2e/tests/machine-link.spec.ts`.
+  - A test client sends reports with Basic. The browser asks for a load. The client claims it and follows the `document` path with Basic only.
+  - The client reads the whole v1 document before it sends the result. The panel then shows `succeeded`.
+  - Red test: the first run against the dev server fails at the missing load form, before task 7.16. Record the failed run in the task. Tasks 7.16 and 7.17 make it pass.
+  - Check: `cd e2e && npm ci && npm test -- machine-link`, with `E2E_PASSWORD` exported, fails at the missing load form. Task 7.17 has the green run.
+- [ ] 9.3 (e2e) [sonnet] Add the cancel and release cases to `e2e/tests/machine-link.spec.ts`.
+  - A release after an unknown result. A cancel, then two polls that update the status part while the address stays `/machines/M12`.
+  - The focus of the cancel button during two polls.
+  - Red test: the first run fails at the missing action part, before task 7.18. Record the failed run in the task. Tasks 7.18 and 7.19 make it pass.
+  - Check: `cd e2e && npm ci && npm test -- machine-link`, with `E2E_PASSWORD` exported, fails at the missing action part. Task 7.19 has the green run.
+- [ ] 9.4 (e2e) [sonnet] Write the poll fault cases in `e2e/tests/machine-link.spec.ts`.
+  - An archive by another person ends the polling with the terminal status part. After a reuse of the code, the old page shows no state of the new machine.
+  - Red test: the first run fails at the missing terminal status part, before task 7.13. Record the failed run in the task. Task 7.13 makes it pass.
+  - Check: `cd e2e && npm ci && npm test -- machine-link`, with `E2E_PASSWORD` exported, fails at the missing terminal status part. Task 7.13 has the green run.
+
+## 10. Checks of the whole change
+
+- [ ] 10.1 (workspace, e2e) [mechanical] Run the local checks of `CONTRIBUTING.md`.
+  - Red test: none, because the task writes no code.
+  - Check: `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --all-features --locked`, `cargo fmt --all --check`, `cargo deny check`, and `cargo llvm-cov --workspace` with the gate of 80 % per crate.
+  - Check: the `ste-lint.py` command of `CLAUDE.md` and `openspec validate machine-link --strict`.
+  - Check: `cd e2e && npm ci && npm test`, with `E2E_PASSWORD` exported.
+- [ ] 10.2 (docs/adr) [mechanical] Set the status of the new ADR to "Accepted" after the code review.
+  - Red test: none, because the task writes no code.
+  - Check: `grep -c '^Status: Accepted' docs/adr/NNNN-adapter-link.md` gives 1.
+
+## Workflow follow-up
+
+- Run `code-review` (Opus, and Codex in parallel) after group 9, and correct every CRITICAL, HIGH, and MEDIUM finding.
+- Archive with `openspec-archive-change` after `cargo test` and `openspec validate` pass.
