@@ -298,7 +298,7 @@ Each task takes at most 2 hours.
 
 ## 7. Hand-off
 
-- [ ] 7.1 (openspec/changes) [orchestrator] After the merge of this change, tell the owner that
+- [x] 7.1 (openspec/changes) [orchestrator] After the merge of this change, tell the owner that
   `value-body-memory-load` can resume at its task 3.1.
   - The merge is the condition of this task. Check: `gh pr view <pr> --json state --jq .state` gives
     `MERGED`.
