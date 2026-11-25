@@ -15,6 +15,12 @@ use recipe_app::operations::AlertCounters;
 use recipe_server::config::args::{self, Command};
 use recipe_server::{create_admin, logging, migrate, panic_hook, pg_env, probe, serve};
 
+/// Allocator probe of the throwaway branch diag/musl-round2.
+/// It replaces the musl allocator, so a CI run can show whether that allocator slows concurrent saves.
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// Runs the subcommand of the command line.
 ///
 /// The function starts the JSON logger once. When `RUST_LOG` is not valid, it writes exactly one

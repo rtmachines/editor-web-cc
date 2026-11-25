@@ -53,6 +53,10 @@ parking_lot = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["fs", "std"] }
 
+# Allocator probe of the throwaway branch diag/musl-round2: only the musl build uses `mimalloc`.
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = "0.1.52"
+
 # ADR-0062 (b): only a build with the feature `dev` accepts `session.secure=false`.
 # The feature is not in a default list, and the release image never enables it.
 [features]

@@ -37,9 +37,10 @@ def app_id():
 def app_cgroup():
     return pathlib.Path(os.environ["STUB_CGROUP"]).with_name(app_id())
 
-def cpu_stat(usage, periods, usec):
+def cpu_stat(usage, user, system, periods, usec):
     (app_cgroup() / "cpu.stat").write_text(
-        f"usage_usec {usage}\nnr_periods 13\nnr_throttled {periods}\nthrottled_usec {usec}\n")
+        f"usage_usec {usage}\nuser_usec {user}\nsystem_usec {system}\n"
+        f"nr_periods 13\nnr_throttled {periods}\nthrottled_usec {usec}\n")
 
 if name == "curl":
     output = pathlib.Path(option("--output"))
@@ -79,7 +80,7 @@ elif name == "load_value":
         baseline = state / f"load-memory-value-baseline-{phase}.json"
         assert baseline.is_file()
         assert pathlib.Path(option("--cgroup")) == app_cgroup()
-        cpu_stat(501, 12, 41)
+        cpu_stat(501, 371, 130, 12, 41)
         (app_cgroup() / "memory.peak").write_text("150000000\n")
         (app_cgroup() / "memory.current").write_text("130000000\n")
         if phase == "2-n1" and os.environ.get("STUB_VALUE_FAILURE") == "subrounds":
@@ -122,7 +123,7 @@ elif name == "docker":
             (app_cgroup() / "memory.stat").write_text(f"anon {anon}\nfile 20000000\n")
             (app_cgroup() / "memory.current").write_text(f"{anon + 20000000}\n")
             (app_cgroup() / "memory.events").write_text("oom 0\noom_kill 0\nmax 0\n")
-            cpu_stat(10, 0, 0)
+            cpu_stat(10, 7, 3, 0, 0)
         elif "ps" in args:
             full_id = app_id()
             print(full_id[:12] if os.environ.get("STUB_SHORT_ID") == "1" else full_id)
@@ -491,10 +492,29 @@ class LoadScriptTests(unittest.TestCase):
                              f"app log {container}\n")
             if phase == "precheck":
                 continue
-            for point, values in (("before", (10, 0, 0)), ("after", (501, 12, 41))):
+            fields = ("usage_usec", "user_usec", "system_usec", "nr_throttled", "throttled_usec")
+            for point, values in (("before", (10, 7, 3, 0, 0)),
+                                  ("after", (501, 371, 130, 12, 41))):
                 path = self.state / f"load-value-cpu-{phase}-{point}.json"
-                fields = ("usage_usec", "nr_throttled", "throttled_usec")
                 self.assertEqual(json.loads(path.read_text()), dict(zip(fields, values)))
+
+    def test_cpu_sample_uses_null_for_unavailable_fields(self):
+        command = 'export PATH="$1:$PATH"\nsource "$2"\ncpu_cgroup "$3"'
+        fields = ("usage_usec", "user_usec", "system_usec", "nr_throttled", "throttled_usec")
+        for contents, values in (
+            (None, (None, None, None, None, None)),
+            ("usage_usec 10\nsystem_usec 3\n", (10, None, 3, None, None)),
+            ("usage_usec 10\nuser_usec 7\nsystem_usec -3\n", (10, 7, None, None, None)),
+        ):
+            with self.subTest(contents=contents):
+                if contents is not None:
+                    (self.cgroup / "cpu.stat").write_text(contents)
+                result = subprocess.run(
+                    [self.bash, "-c", command, "cpu-test", posix_path(self.stubs),
+                     posix_path(CI / "memory.sh"), posix_path(self.cgroup)],
+                    cwd=ROOT, text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), dict(zip(fields, values)))
 
     def test_value_keeps_the_first_failure_and_measures_all_subrounds(self):
         result = self.run_load("value", STUB_VALUE_FAILURE="subrounds")
@@ -504,7 +524,10 @@ class LoadScriptTests(unittest.TestCase):
             self.assertIn(("round", phase), self.value_events())
             self.assertTrue((self.state / f"load-memory-value-round-{phase}.json").is_file())
             sample = self.state / f"load-value-cpu-{phase}-after.json"
-            self.assertEqual(json.loads(sample.read_text())["usage_usec"], 501)
+            self.assertEqual(json.loads(sample.read_text()), {
+                "usage_usec": 501, "user_usec": 371, "system_usec": 130,
+                "nr_throttled": 12, "throttled_usec": 41,
+            })
         self.assertEqual((self.state / "load-value-app-2-n4.log").read_text(), "app log e\n")
 
     def test_value_keeps_running_after_a_subround_recreate_fails(self):
