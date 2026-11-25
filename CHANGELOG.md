@@ -17,6 +17,8 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ### Changed
 
+- The musl build of `recipe-server` uses `mimalloc` as its global allocator (ADR-0224).
+  The change addresses slow concurrent saves on the musl build.
 - The runbook section "Keep the images for a rollback" skips the image ID comparison for releases up to 0.7.1 (ADR-0198 (d)).
   Their release notes hold no image ID. The operator records the skip in the change log of the site.
 - Step 5 of that section says that "Load the images" loads no image of a release up to 0.7.1. The operator then stops and records the missing image.

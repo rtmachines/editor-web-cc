@@ -15,6 +15,14 @@ use recipe_app::operations::AlertCounters;
 use recipe_server::config::args::{self, Command};
 use recipe_server::{create_admin, logging, migrate, panic_hook, pg_env, probe, serve};
 
+/// Allocator of the musl build (ADR-0224).
+///
+/// The allocator of musl slows concurrent saves (R43). This static replaces it with `mimalloc`.
+/// Other targets keep the system allocator.
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// Runs the subcommand of the command line.
 ///
 /// The function starts the JSON logger once. When `RUST_LOG` is not valid, it writes exactly one

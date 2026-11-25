@@ -25,6 +25,7 @@ done
 python3 -I -B - <<'PY'
 from pathlib import Path
 import re
+import tomllib
 
 
 def cc_debian13_matches(source, candidate):
@@ -303,9 +304,13 @@ def test_load_job():
 test_load_job()
 
 
+# Keep comments and blank lines in the YAML job body.
+WORKFLOW_JOB_BODY = r'((?:    .*\n|[ \t]*#.*\n|[ \t]*\n)*)'
+
+
 def compose_smoke_steps():
     workflow = Path('.github/workflows/ci.yml').read_text(encoding='utf-8')
-    match = re.search(r'^  compose:\n((?:    .*\n|\n)*)', workflow, re.M)
+    match = re.search(r'^  compose:\n' + WORKFLOW_JOB_BODY, workflow, re.M)
     if not match:
         raise SystemExit('ci.yml has no job compose')
     body = match.group(1)
@@ -414,6 +419,13 @@ for path in paths:
 print('CI syntax and tracing checks passed.')
 
 
+def restricted_workflow_key():
+    restricted = r"""(['"]?)(?:if|needs|continue-on-error)\1[ \t]*:"""
+    # Reject unsupported YAML keys instead of decoding them.
+    plain = r"""(?:[A-Za-z0-9_-]+|"[A-Za-z0-9_-]+"|'[A-Za-z0-9_-]+')[ \t]*:"""
+    return '(?:' + restricted + '|(?!' + plain + r')[^\s#])'
+
+
 def check_secure_refusal(lines):
     command = r'^      (?:  |- )run: bash deploy/ci/rust-tests\.sh secure$'
     if len(re.findall(command, '\n'.join(lines), re.M)) != 1:
@@ -423,14 +435,14 @@ def check_secure_refusal(lines):
         raise SystemExit('ci.yml has no job test')
     start = lines.index(header) + 1
     end = start
-    while end < len(lines) and (lines[end].startswith('    ') or not lines[end].strip()):
+    while end < len(lines) and (
+        lines[end].startswith('    ')
+        or not lines[end].strip()
+        or lines[end].lstrip(' \t').startswith('#')
+    ):
         end += 1
     body = '\n'.join(lines[start:end])
-    restricted_key = r"""(['"]?)(?:if|needs|continue-on-error)\1[ \t]*:"""
-    # Reject unsupported YAML keys instead of decoding them.
-    plain_key = r"""(?:[A-Za-z0-9_-]+|"[A-Za-z0-9_-]+"|'[A-Za-z0-9_-]+')[ \t]*:"""
-    unsupported_key = '(?!' + plain_key + r')[^\s#]'
-    restricted_key = '(?:' + restricted_key + '|' + unsupported_key + ')'
+    restricted_key = restricted_workflow_key()
     if re.search(r'^    ' + restricted_key, body, re.M):
         raise SystemExit('test must run on each pull request and report failures')
     steps = re.split(r'(?=^      - )', body, flags=re.M)[1:]
@@ -447,12 +459,16 @@ def test_secure_refusal_step():
     print('CI secure refusal step check passed.')
 
 
+DISABLED_JOB_AFTER_COMMENT = '# End of the steps.\n    if: ${{ false }}\n'
+
+
 def test_secure_refusal_mutations():
     workflow = Path('.github/workflows/ci.yml').read_text(encoding='utf-8')
+    run_line = '        run: bash deploy/ci/rust-tests.sh secure\n'
+    job_error = 'test must run on each pull request and report failures'
     anchors = (
-        ('  test:\n', '    ', 'test must run on each pull request and report failures'),
-        ('        run: bash deploy/ci/rust-tests.sh secure\n', '        ',
-         'secure refusal step must run and report failures'),
+        ('  test:\n', '    ', job_error),
+        (run_line, '        ', 'secure refusal step must run and report failures'),
     )
     for anchor, indent, message in anchors:
         if workflow.count(anchor) != 1:
@@ -485,9 +501,244 @@ def test_secure_refusal_mutations():
                     raise SystemExit(f'wrong secure refusal error: {error}') from error
             else:
                 raise SystemExit(f'secure refusal check accepted {field.strip()!r} at {indent!r}')
+    fixture = workflow.replace(run_line, run_line + DISABLED_JOB_AFTER_COMMENT, 1)
+    try:
+        check_secure_refusal(fixture.splitlines())
+    except SystemExit as error:
+        if str(error) != job_error:
+            raise SystemExit(f'Wrong secure refusal error after a comment. {error}') from error
+    else:
+        raise SystemExit('The secure refusal check accepted a disabled job test after a comment.')
     print('CI secure refusal mutation checks passed.')
 
 
 test_secure_refusal_step()
 test_secure_refusal_mutations()
+
+
+ALLOCATOR_RULE_RUN = 'run: python3 -I -B deploy/ci/allocator_rule.py'
+MUSL_CLIPPY_RUN = 'run: bash deploy/ci/rust-tests.sh musl-clippy'
+UNWIND_RUN_COMMAND = 'run: bash deploy/ci/rust-tests.sh mimalloc-unwind'
+
+ALLOCATOR_RULE_STEP = f'      - name: Check the allocator\n        {ALLOCATOR_RULE_RUN}\n'
+MUSL_CLIPPY_STEP = f'      - name: Run Clippy on musl\n        {MUSL_CLIPPY_RUN}\n'
+UNWIND_STEP = f'      - name: Test mimalloc unwind\n        {UNWIND_RUN_COMMAND}\n'
+MOVE_TARGET_STEP = '      - run: echo test\n'
+MUSL_PIN_WORKFLOW = (
+    'name: Test the musl pins\n'
+    'on: pull_request\n'
+    'jobs:\n'
+    '  deny:\n'
+    '    runs-on: ubuntu-latest\n'
+    '    steps:\n'
+    '      - run: echo deny\n'
+    f'{ALLOCATOR_RULE_STEP}'
+    '  musl-unwind:\n'
+    '    runs-on: ubuntu-latest\n'
+    '    steps:\n'
+    f'{MUSL_CLIPPY_STEP}{UNWIND_STEP}'
+    '  test:\n'
+    '    runs-on: ubuntu-latest\n'
+    '    steps:\n'
+    f'{MOVE_TARGET_STEP}'
+)
+
+
+def check_allocator_rule_step(workflow):
+    command = r'^      (?:  |- )' + re.escape(ALLOCATOR_RULE_RUN) + r'$'
+    if len(re.findall(command, workflow, re.M)) != 1:
+        raise SystemExit('CI needs exactly one step that runs allocator_rule.py.')
+    job = re.search(r'^  deny:\n' + WORKFLOW_JOB_BODY, workflow, re.M)
+    if not job:
+        raise SystemExit('ci.yml has no job deny.')
+    body = job.group(1)
+    restricted_key = restricted_workflow_key()
+    if re.search(r'^    ' + restricted_key, body, re.M):
+        raise SystemExit('The job deny must run on each pull request and report failures.')
+    steps = re.split(r'(?=^      - )', body, flags=re.M)[1:]
+    matches = [step for step in steps if re.search(command, step, re.M)]
+    if len(matches) != 1:
+        raise SystemExit('The allocator rule step must run in the job deny.')
+    if re.search(r'^      (?:  |- )' + restricted_key, matches[0], re.M):
+        raise SystemExit('The allocator rule step must run and report failures.')
+
+
+def test_allocator_rule_mutations(workflow):
+    run_line = f'        {ALLOCATOR_RULE_RUN}\n'
+    step = ALLOCATOR_RULE_STEP
+    removed = workflow.replace(step, '', 1)
+    count_error = 'CI needs exactly one step that runs allocator_rule.py.'
+    step_error = 'The allocator rule step must run and report failures.'
+    cases = [
+        ('removed step', removed, count_error),
+        ('duplicate step', workflow.replace(step, step + step, 1), count_error),
+        ('step in another job', removed.replace(MOVE_TARGET_STEP, step + MOVE_TARGET_STEP, 1),
+         'The allocator rule step must run in the job deny.'),
+        ('disabled job deny', workflow.replace('  deny:\n', '  deny:\n    if: ${{ false }}\n', 1),
+         'The job deny must run on each pull request and report failures.'),
+        ('disabled job deny after a comment',
+         workflow.replace(step, step + DISABLED_JOB_AFTER_COMMENT, 1),
+         'The job deny must run on each pull request and report failures.'),
+    ]
+    for field in ('if: ${{ false }}', 'needs: test', 'continue-on-error: true',
+                  r'"\u0069f": ${{ false }}'):
+        changed_step = step.replace(run_line, f'        {field}\n' + run_line, 1)
+        cases.append((field, workflow.replace(step, changed_step, 1), step_error))
+    for label, fixture, message in cases:
+        try:
+            check_allocator_rule_step(fixture)
+        except SystemExit as error:
+            if str(error) != message:
+                raise SystemExit(f'Wrong allocator rule error for {label!r}. {error}') from error
+        else:
+            raise SystemExit(f'The allocator rule check accepted {label!r}.')
+    print('CI allocator rule mutation checks passed.')
+
+
+allocator_workflow = Path('.github/workflows/ci.yml').read_text(encoding='utf-8')
+check_allocator_rule_step(allocator_workflow)
+print('CI allocator rule step check passed.')
+test_allocator_rule_mutations(MUSL_PIN_WORKFLOW)
+
+
+def check_musl_clippy_step(workflow):
+    command = r'^      (?:  |- )' + re.escape(MUSL_CLIPPY_RUN) + r'$'
+    if len(re.findall(command, workflow, re.M)) != 1:
+        raise SystemExit('CI needs exactly one step that runs rust-tests.sh musl-clippy.')
+    job = re.search(r'^  musl-unwind:\n' + WORKFLOW_JOB_BODY, workflow, re.M)
+    if not job:
+        raise SystemExit('ci.yml has no job musl-unwind.')
+    body = job.group(1)
+    restricted_key = restricted_workflow_key()
+    if re.search(r'^    ' + restricted_key, body, re.M):
+        raise SystemExit('The job musl-unwind must run on each pull request and report failures.')
+    steps = re.split(r'(?=^      - )', body, flags=re.M)[1:]
+    matches = [step for step in steps if re.search(command, step, re.M)]
+    if len(matches) != 1:
+        raise SystemExit('The musl Clippy step must run in the job musl-unwind.')
+    if re.search(r'^      (?:  |- )' + restricted_key, matches[0], re.M):
+        raise SystemExit('The musl Clippy step must run and report failures.')
+
+
+def test_musl_clippy_mutations(workflow):
+    run_line = f'        {MUSL_CLIPPY_RUN}\n'
+    step = MUSL_CLIPPY_STEP
+    removed = workflow.replace(step, '', 1)
+    disabled = step.replace(run_line, '        if: ${{ false }}\n' + run_line, 1)
+    count_error = 'CI needs exactly one step that runs rust-tests.sh musl-clippy.'
+    cases = [
+        ('removed step', removed, count_error),
+        ('duplicate step', workflow.replace(step, step + step, 1), count_error),
+        ('step in another job', removed.replace(MOVE_TARGET_STEP, step + MOVE_TARGET_STEP, 1),
+         'The musl Clippy step must run in the job musl-unwind.'),
+        ('disabled step', workflow.replace(step, disabled, 1),
+         'The musl Clippy step must run and report failures.'),
+        ('job musl-unwind with continue-on-error',
+         workflow.replace('  musl-unwind:\n', '  musl-unwind:\n    continue-on-error: true\n', 1),
+         'The job musl-unwind must run on each pull request and report failures.'),
+        ('disabled job musl-unwind after a comment',
+         workflow.replace(UNWIND_STEP, UNWIND_STEP + DISABLED_JOB_AFTER_COMMENT, 1),
+         'The job musl-unwind must run on each pull request and report failures.'),
+    ]
+    for label, fixture, message in cases:
+        try:
+            check_musl_clippy_step(fixture)
+        except SystemExit as error:
+            if str(error) != message:
+                raise SystemExit(f'Wrong musl Clippy error for {label!r}. {error}') from error
+        else:
+            raise SystemExit(f'The musl Clippy check accepted {label!r}.')
+    print('CI musl Clippy mutation checks passed.')
+
+
+check_musl_clippy_step(allocator_workflow)
+print('CI musl Clippy step check passed.')
+test_musl_clippy_mutations(MUSL_PIN_WORKFLOW)
+
+
+def check_mimalloc_unwind_step(workflow):
+    command = r'^      (?:  |- )' + re.escape(UNWIND_RUN_COMMAND) + r'$'
+    if len(re.findall(command, workflow, re.M)) != 1:
+        raise SystemExit('CI needs exactly one step that runs rust-tests.sh mimalloc-unwind.')
+    job = re.search(r'^  musl-unwind:\n' + WORKFLOW_JOB_BODY, workflow, re.M)
+    if not job:
+        raise SystemExit('ci.yml has no job musl-unwind.')
+    body = job.group(1)
+    restricted_key = restricted_workflow_key()
+    if re.search(r'^    ' + restricted_key, body, re.M):
+        raise SystemExit('The job musl-unwind must run on each pull request and report failures.')
+    steps = re.split(r'(?=^      - )', body, flags=re.M)[1:]
+    matches = [step for step in steps if re.search(command, step, re.M)]
+    if len(matches) != 1:
+        raise SystemExit('The mimalloc unwind step must run in the job musl-unwind.')
+    if re.search(r'^      (?:  |- )' + restricted_key, matches[0], re.M):
+        raise SystemExit('The mimalloc unwind step must run and report failures.')
+
+
+def test_mimalloc_unwind_mutations(workflow):
+    run_line = f'        {UNWIND_RUN_COMMAND}\n'
+    step = UNWIND_STEP
+    removed = workflow.replace(step, '', 1)
+    disabled = step.replace(run_line, '        if: ${{ false }}\n' + run_line, 1)
+    count_error = 'CI needs exactly one step that runs rust-tests.sh mimalloc-unwind.'
+    cases = [
+        ('removed step', removed, count_error),
+        ('duplicate step', workflow.replace(step, step + step, 1), count_error),
+        ('step in another job', removed.replace(MOVE_TARGET_STEP, step + MOVE_TARGET_STEP, 1),
+         'The mimalloc unwind step must run in the job musl-unwind.'),
+        ('disabled step', workflow.replace(step, disabled, 1),
+         'The mimalloc unwind step must run and report failures.'),
+        ('disabled job musl-unwind',
+         workflow.replace('  musl-unwind:\n', '  musl-unwind:\n    if: ${{ false }}\n', 1),
+         'The job musl-unwind must run on each pull request and report failures.'),
+        ('disabled job musl-unwind after a comment',
+         workflow.replace(step, step + DISABLED_JOB_AFTER_COMMENT, 1),
+         'The job musl-unwind must run on each pull request and report failures.'),
+    ]
+    for label, fixture, message in cases:
+        try:
+            check_mimalloc_unwind_step(fixture)
+        except SystemExit as error:
+            if str(error) != message:
+                raise SystemExit(f'Wrong mimalloc unwind error for {label!r}. {error}') from error
+        else:
+            raise SystemExit(f'The mimalloc unwind check accepted {label!r}.')
+    print('CI mimalloc unwind mutation checks passed.')
+
+
+check_mimalloc_unwind_step(allocator_workflow)
+print('CI mimalloc unwind step check passed.')
+test_mimalloc_unwind_mutations(MUSL_PIN_WORKFLOW)
+
+
+RELEASE_PANIC_ERROR = 'Cargo.toml must set panic = "unwind" in [profile.release].'
+
+
+def check_release_panic(manifest):
+    profile = tomllib.loads(manifest).get('profile')
+    release = profile.get('release') if isinstance(profile, dict) else None
+    if not isinstance(release, dict) or release.get('panic') != 'unwind':
+        raise SystemExit(RELEASE_PANIC_ERROR)
+
+
+def test_release_panic_mutations():
+    cases = (
+        ('removed panic key', '[profile.release]\noverflow-checks = true\n'),
+        ('panic set to abort', '[profile.release]\npanic = "abort"\n'),
+        ('removed release section', '[profile.dev]\npanic = "unwind"\n'),
+    )
+    for label, fixture in cases:
+        try:
+            check_release_panic(fixture)
+        except SystemExit as error:
+            if str(error) != RELEASE_PANIC_ERROR:
+                raise SystemExit(f'Wrong release panic error for {label!r}. {error}') from error
+        else:
+            raise SystemExit(f'The release panic check accepted {label!r}.')
+    print('CI release panic mutation checks passed.')
+
+
+check_release_panic(Path('Cargo.toml').read_text(encoding='utf-8'))
+print('CI release panic profile check passed.')
+test_release_panic_mutations()
 PY

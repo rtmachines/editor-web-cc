@@ -134,7 +134,7 @@ Internal operations have no permission and no row of the matrix: `EnsureDerivedT
 | `recipe-db` | None public. Maps `sqlx::Error` with SQLSTATE into `StorageError` of `recipe-app` | `sqlx` (postgres, runtime-tokio, tls-rustls), `recipe-app` | `axum` |
 | `recipe-export` | None of its own. It returns `ExportError` of `recipe-domain` | `serde`, `serde_json`, `recipe-domain` | `sqlx`, `axum`, `recipe-app` |
 | `recipe-web` | `thiserror` (`WebError`, HTTP shape only) | `axum`, `askama`, `fluent`, `tower-http`, `cookie`, `subtle`, `recipe-app`, `recipe-export` (ADR-0035) | `sqlx`, any session library |
-| `recipe-server` | `anyhow` (the binary and its library target of ADR-0060 (bb), `main` returns `anyhow::Result`) | every crate above except `recipe-export`, `tokio`, `tracing-subscriber` (`env-filter`), `figment`, `axum`, `hyper`, `hyper-util`, `tokio-util`, `tower`, `time`, `rustix` (Unix only), `hyper-rustls`, `rustls`, `http-body-util` (ADR-0060, ADR-0063) | `recipe-export` (only `recipe-web` uses it), `sqlx` |
+| `recipe-server` | `anyhow` (the binary and its library target of ADR-0060 (bb), `main` returns `anyhow::Result`) | every crate above except `recipe-export`, `tokio`, `tracing-subscriber` (`env-filter`), `figment`, `axum`, `hyper`, `hyper-util`, `tokio-util`, `tower`, `time`, `rustix` (Unix only), `mimalloc` (musl target only, ADR-0224), `hyper-rustls`, `rustls`, `http-body-util` (ADR-0060, ADR-0063) | `recipe-export` (only `recipe-web` uses it), `sqlx` |
 
 `recipe-web` sets the session cookie from the result of the `Login` and `ChangeOwnPassword` use cases. The `session` table and its adapter in `recipe-db` belong to the project (ADR-0014).
 
