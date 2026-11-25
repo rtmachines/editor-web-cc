@@ -252,7 +252,7 @@ Each task takes at most 2 hours.
 
 ## 5. Local checks
 
-- [ ] 5.1 (workspace) [mechanical] Run each command of the block of the section "Local checks" of
+- [x] 5.1 (workspace) [mechanical] Run each command of the block of the section "Local checks" of
   `CONTRIBUTING.md`, in its order.
   - Red test: none, because the task writes no code.
   - Check: each command of that block exits with 0. The block includes `rust-tests.sh secure`,
@@ -264,7 +264,7 @@ Each task takes at most 2 hours.
 
 ## 6. CI measurement
 
-- [ ] 6.1 (deploy) [orchestrator] Ask the owner to approve the commit, the push of the branch, and
+- [x] 6.1 (deploy) [orchestrator] Ask the owner to approve the commit, the push of the branch, and
   one `workflow_dispatch` of `ci.yml` on it. Do nothing before the approval.
   - The run measures the head commit of the branch, not `main`. Check:
     `gh run view <run> --json headSha --jq .headSha` gives that commit.
@@ -287,7 +287,7 @@ Each task takes at most 2 hours.
     `.flood.peak`, and `.peak` are below 536 870 912.
   - Check: in that file, `.timings.oom_kill`, `.flood.oom_kill`, `.timings.RestartCount`, and
     `.flood.RestartCount` are 0.
-- [ ] 6.2 (docs/adr) [mechanical] Add the run of task 6.1 and its peaks to the section "Measured
+- [x] 6.2 (docs/adr) [mechanical] Add the run of task 6.1 and its peaks to the section "Measured
   numbers" of ADR-0224. Set its status and its index row to "Accepted".
   - Check: `grep -c '^Status: Accepted' docs/adr/0224-mimalloc-on-the-musl-build.md` gives 1.
   - Check: `grep -c '<run id of task 6.1>' docs/adr/0224-mimalloc-on-the-musl-build.md` gives at

@@ -1,6 +1,6 @@
 # ADR-0224: `mimalloc` as the global allocator of the musl build
 
-Status: Proposed
+Status: Accepted
 Date: 2026-11-25
 Deciders: project owner
 
@@ -299,6 +299,19 @@ With `mimalloc` and default options, the system CPU time of each reading is 0.02
 - `ApproveVersion` took 2.40 s in run 45485053543 and 2.43 s in run 45563565325 with mallocng. It
   took 1.25 s with `mimalloc`. Four glibc runs gave 1.16 s to 1.50 s.
 - Run 45485053543 of the paused change also gave the fourth glibc values.
+
+Run 45657355507 measured commit 13ba427 of this change. It ran once.
+
+- The job `Load (musl)` passed. `memory.peak` of `app` was 126 636 032 bytes for the timings and
+  142 409 728 bytes for the login flood. No OOM kill and no restart occurred.
+- The musl leg gave 42.3 logins per second. `GetVersion` took 0.47 s, `ApproveVersion` 1.23 s, and
+  `CreateVersion` 1.01 s.
+- The job `Load (cc-debian13)` passed. Its peaks were 188 039 168 bytes for the timings and
+  109 502 464 bytes for the login flood.
+- The glibc leg gave 40.2 logins per second. `GetVersion` took 0.42 s, `ApproveVersion` 1.14 s, and
+  `CreateVersion` 1.00 s.
+- The job `Panic unwind on musl` passed in 8 minutes. The test of item (q) passed in the dev profile
+  and in the release profile.
 
 ## Consequences
 

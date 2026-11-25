@@ -232,7 +232,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0220](0220-origin-check-of-a-dev-build-on-plain-http.md) | Origin check of a dev build on plain HTTP | Accepted. Amends ADR-0035 (e) | 2026-11-22 |
 | [0221](0221-zero-tail-after-a-record-length-of-0.md) | Zero tail after a record length of 0 | Accepted. Amends ADR-0217 (b) step 5 and `reliability.md` §7.7, and adds the item of a short file and a known limit | 2026-11-22 |
 | [0223](0223-memory-of-the-grid-answers.md) | Memory of the grid answers | Accepted. Amends ADR-0039 (k), ADR-0045 (b) and ADR-0138 (c) | 2026-11-22 |
-| [0224](0224-mimalloc-on-the-musl-build.md) | `mimalloc` as the global allocator of the musl build | Proposed. Amends the context and the risk of the allocator of ADR-0064. Amends item (z) of ADR-0070 (the unwind proof with `mimalloc`) | 2026-11-25 |
+| [0224](0224-mimalloc-on-the-musl-build.md) | `mimalloc` as the global allocator of the musl build | Accepted. Amends the context and the risk of the allocator of ADR-0064. Amends item (z) of ADR-0070 (the unwind proof with `mimalloc`) | 2026-11-25 |
 
 ## Decision map
 
