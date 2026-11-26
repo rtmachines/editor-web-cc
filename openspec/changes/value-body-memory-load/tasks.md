@@ -280,7 +280,7 @@ Each `[deploy]` task of this group pushes to the branch and dispatches `ci.yml` 
 
 In each `Check:` command, `<run>` is the ID of the dispatched run. `<musl job>` is the ID of the job `Load (musl)` of that run.
 
-- [ ] 3.1 (deploy) [deploy] D1, D4, D8. Push the branch. Run `gh workflow run ci.yml --ref "$(git branch --show-current)"`.
+- [x] 3.1 (deploy) [deploy] D1, D4, D8. Push the branch. Run `gh workflow run ci.yml --ref "$(git branch --show-current)"`.
   - Read the value leg of the musl leg. When the peak of the round 2 reading of the musl leg is at or above 384 MiB, stop and ask the owner. The round 1 reading and the `cc-debian13` leg report only.
   - When round 1 fails an answer, `row_version`, or overlap check, stop and ask the owner. Round 2 then does not run.
   - After a stop in round 1, the job has no artifact. Then take the values of round 1 from the job summary of the run.
@@ -292,19 +292,19 @@ In each `Check:` command, `<run>` is the ID of the dispatched run. `<musl job>` 
   - Check: `gh run view <run> --json jobs --jq '.jobs[] | select(.name == "Load (musl)") | ((.completedAt | fromdate) - (.startedAt | fromdate))'` gives at most 3300.
   - Thus a reserve of at least 5 minutes remains before `timeout-minutes: 60`.
   - Check: `gh run download <run> -n load-musl` gives `load-value.json` with the elapsed times and the container ID, peak, body length, and run statistic of each round.
-- [ ] 3.2 (recipe-web) D2. Mutation A. Make a temporary commit that sets `DEFAULT_VALUE_BODY_PERMITS` to 1 in `crates/recipe-web/src/settings.rs`.
+- [x] 3.2 (recipe-web) D2. Mutation A. Make a temporary commit that sets `DEFAULT_VALUE_BODY_PERMITS` to 1 in `crates/recipe-web/src/settings.rs`.
   - Record the commit SHA of `git rev-parse HEAD` as `MUTATION_A` in the report.
   - Red test: the mutation itself.
   - Check: `git show --stat HEAD` names only `crates/recipe-web/src/settings.rs`, and `cargo build -p recipe-web` passes.
-- [ ] 3.3 (deploy) [deploy] D4. Push mutation A and dispatch `ci.yml`. Round 1 of `Load (musl)` at `MUTATION_A` must fail on the overlap.
+- [x] 3.3 (deploy) [deploy] D4. Push mutation A and dispatch `ci.yml`. Round 1 of `Load (musl)` at `MUTATION_A` must fail on the overlap.
   - The expected error is "round 1: request <reference> did not reach the barrier" or "round 1: the bodies did not overlap".
   - Red test: the mutation of task 3.2.
   - Check: `gh run view <run> --json headSha --jq .headSha` gives `MUTATION_A`.
   - Check: `gh run view <run> --job <musl job> --log | grep -E 'round 1: (request LOAD-V[1-4] did not reach the barrier|the bodies did not overlap)'` gives a line.
-- [ ] 3.4 (recipe-web) [mechanical] Revert mutation A with `git revert --no-edit <MUTATION_A>`.
+- [x] 3.4 (recipe-web) [mechanical] Revert mutation A with `git revert --no-edit <MUTATION_A>`.
   - Red test: none, because this task reverts a mutation.
   - Check: `git diff <MUTATION_A>~1 HEAD -- crates/recipe-web/src/settings.rs` is empty.
-- [ ] 3.5 (recipe-web) D1, D8. Mutation B. Make a temporary commit in `crates/recipe-web/src/csrf.rs`. `csrf_layer` keeps N extra copies of each round 2 value body until the handler returns.
+- [x] 3.5 (recipe-web) D1, D8. Mutation B. Make a temporary commit in `crates/recipe-web/src/csrf.rs`. `csrf_layer` keeps N extra copies of each round 2 value body until the handler returns.
   - Each copy is a new allocation of the bytes, not a clone of `Bytes`.
   - Take P2, the round 2 peak, and B2, the round 2 body length, from task 3.1. N is the smallest integer with P2 + 4 × N × B2 at or above 384 MiB.
   - When P2 + 4 × N × B2 is at or above 512 MiB, stop and ask the owner.
@@ -313,7 +313,7 @@ In each `Check:` command, `<run>` is the ID of the dispatched run. `<musl job>` 
   - Record N and the commit SHA of `git rev-parse HEAD` as `MUTATION_B` in the report.
   - Red test: the mutation itself.
   - Check: `git show --stat HEAD` names only `crates/recipe-web/src/csrf.rs`, and `cargo build -p recipe-web` passes.
-- [ ] 3.6 (deploy) [deploy] D1, D8. Push tasks 3.4 and 3.5 and dispatch `ci.yml`. The musl leg must fail on the ceiling of round 2.
+- [x] 3.6 (deploy) [deploy] D1, D8. Push tasks 3.4 and 3.5 and dispatch `ci.yml`. The musl leg must fail on the ceiling of round 2.
   - Round 1 must pass its answer checks. Round 2 must finish with zero OOM events, and its peak must lie from 384 MiB to below 512 MiB.
   - When the run misses one of these conditions, stop and ask the owner.
   - This proves the sensitivity of the gate.
@@ -323,20 +323,20 @@ In each `Check:` command, `<run>` is the ID of the dispatched run. `<musl job>` 
   - Check: `load-value.json` of `gh run download <run> -n load-musl` has two rounds and a round 2 peak from 402 653 184 to 536 870 911 bytes.
   - Check: `load-memory.json` of the same artifact has `oom_kill`, `oom`, and `max` equal to 0 in the readings `value-baseline-2` and `value-round-2`.
   - Check: `jq -e '.failures == ["round 2 reading reached the ceiling of 384 MiB"]'` on `load-value.json` of the same artifact gives `true`.
-- [ ] 3.7 (recipe-web) [mechanical] Revert mutation B with `git revert --no-edit <MUTATION_B>`.
+- [x] 3.7 (recipe-web) [mechanical] Revert mutation B with `git revert --no-edit <MUTATION_B>`.
   - Red test: none, because this task reverts a mutation.
   - Check: `git diff origin/main -- crates/recipe-web/src/settings.rs crates/recipe-web/src/csrf.rs` is empty.
-- [ ] 3.8 (deploy) [deploy] D1, D8. Push the revert and dispatch `ci.yml` on the reverted SHA. The round 1 reading only reports, so both legs can pass before change B.
+- [x] 3.8 (deploy) [deploy] D1, D8. Push the revert and dispatch `ci.yml` on the reverted SHA. The round 1 reading only reports, so both legs can pass before change B.
   - Red test: none, because this task proves the revert.
   - Check: `gh run view <run> --json headSha,jobs` shows the `headSha` of `git rev-parse HEAD` and `success` for both legs of the job `load`.
   - Read `failures` of `load-value.json` of the artifact `load-cc-debian13`. When it names an answer, a `row_version`, or the overlap, stop and ask the owner.
 
 ## 4. Record
 
-- [ ] 4.1 (docs/architecture) [mechanical] D7, D8, ADR-0222 (f). In `reliability.md` §7.8, replace "about 4 × 48 MiB" with the peak, the body length, and the run statistic of each round of task 3.1.
+- [x] 4.1 (docs/architecture) [mechanical] D7, D8, ADR-0222 (f). In `reliability.md` §7.8, replace "about 4 × 48 MiB" with the peak, the body length, and the run statistic of each round of task 3.1.
   - Compare each run statistic with 3 × the body length of its round. Say that the job `load` checks the ceiling on round 2 of the musl leg and reports round 1 only (ADR-0222).
   - Red test: none, because this task writes a document. Check: `python -I tools/ste-lint/ste-lint.py docs/architecture/reliability.md` gives 0 hard violations.
-- [ ] 4.2 (CHANGELOG.md) [mechanical] Add one line for the value leg of the load job under "Unreleased".
+- [x] 4.2 (CHANGELOG.md) [mechanical] Add one line for the value leg of the load job under "Unreleased".
   - Red test: none, because this task writes a document. Check: `python -I tools/ste-lint/ste-lint.py CHANGELOG.md` gives 0 hard violations.
 - [ ] 4.3 (openspec) [mechanical] Run the full gates.
   - Red test: none, because this task runs the gates. Check: `openspec validate value-body-memory-load --strict` passes, and the ste-lint command of `CLAUDE.md` gives 0 hard violations.

@@ -930,7 +930,18 @@ Resource limits per container are the keys `container.*` of 7.11 (ADR-0070 (f) t
 
 The Argon2 semaphore keeps hashing memory at 4 × 19 MiB, which is 15 % of the `app` limit.
 
-One request of 16 MiB buffers its body about three times. The permits of `http.value_body_permits` thus keep the buffered value bodies at about 4 × 48 MiB (ADR-0211 (p)).
+The permits of `http.value_body_permits` limit the buffered value bodies to four at one time (ADR-0211 (p)). The run statistic of a round is the peak of its reading minus `memory.current` of its baseline reading, divided by four (ADR-0222).
+
+CI run 45748785867 at commit bcb3824 measured two rounds on the musl leg. Sizes are in bytes:
+
+| Round | Peak | Body length | Run statistic | 3 × body length |
+|---|---|---|---|---|
+| 1 | 352993280 | 16743514 | 80529408 | 50230542 |
+| 2 | 268808192 | 3033541 | 59540480 | 9100623 |
+
+The run statistic is above 3 × the body length in both rounds. It is about 1.6 times that value in round 1 and about 6.5 times in round 2. Round 2 buffers a smaller body than round 1.
+
+The job `load` checks the ceiling on round 2 of the musl leg and reports round 1 only (ADR-0222). The same run measured the report leg `cc-debian13` as follows. Round 1 had a peak of 400224256 bytes and a run statistic of 98621440 bytes. Round 2 had a peak of 293281792 bytes and a run statistic of 71759872 bytes.
 
 Disk space policy (Assumption A24):
 
