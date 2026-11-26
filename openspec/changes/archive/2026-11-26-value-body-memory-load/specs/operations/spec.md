@@ -120,7 +120,7 @@ Each request of a round SHALL go to its own draft, and both rounds SHALL use the
 ## MODIFIED Requirements
 
 ### Requirement: Memory of the container app under load
-The load job SHALL read the memory of the container `app` after the timings, after the flood, and six times in the value leg. The container SHALL stay under its memory limit of 512 MiB, with no OOM kill and no restart. The `value-round-1` reading SHALL only report these bounds. On the musl leg, a failed bound of another reading SHALL fail the job. The `cc-debian13` leg SHALL report the bounds of every reading, which are the timings, the flood, and the value readings. A missing memory value of any reading SHALL fail both legs (R30, R31, A26).
+The load job SHALL read the memory of the container `app` after the timings, after the flood, and six times in the value leg. The container SHALL stay under its memory limit of 512 MiB, with no OOM kill and no restart. On the musl leg, a failed bound SHALL fail the job, except in the `value-round-1` reading. The `cc-debian13` leg SHALL report the bounds of every reading. A missing memory value SHALL fail both legs (R30, R31, A26).
 
 #### Scenario: Memory limit exceeded
 - **GIVEN** a load run of the musl leg in which the kernel kills a process of `app` for its memory limit
