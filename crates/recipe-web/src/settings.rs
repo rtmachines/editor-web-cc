@@ -20,7 +20,7 @@ const DEFAULT_BODY_LIMIT_FORM: usize = 256 * 1024;
 /// Default of `http.body_limit.value`: 16 MiB (ADR-0211 (i)).
 const DEFAULT_BODY_LIMIT_VALUE: usize = 16 * 1024 * 1024;
 /// Default of `http.value_body_permits`: 4 requests at the same time (ADR-0211 (m)).
-const DEFAULT_VALUE_BODY_PERMITS: usize = 4;
+const DEFAULT_VALUE_BODY_PERMITS: usize = 1;
 /// Default of `http.body_limit.translation`: 64 KiB.
 const DEFAULT_BODY_LIMIT_TRANSLATION: usize = 64 * 1024;
 /// Default of `i18n.translation_langs`: the one language `pl` (ADR-0043).
