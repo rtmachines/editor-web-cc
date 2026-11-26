@@ -171,6 +171,7 @@ def test_ci_scripts_job():
 test_ci_scripts_job()
 
 
+# Start of the load job checks.
 def load_job_body():
     lines = Path('.github/workflows/ci.yml').read_text(encoding='utf-8').splitlines()
     header = '  load:'
@@ -212,20 +213,22 @@ def check_load_policy(body, steps):
         require_load(body, pattern, message)
     if re.search(r'^    continue-on-error:', body, re.M):
         raise SystemExit('load must not ignore job failures')
+    if not {'value_seed', 'value', 'value_check'} <= steps.keys():
+        raise SystemExit('load is missing the value leg')
     order = ('runner', 'prepare', 'build_musl', 'build_cc_debian13', 'build_pgtools',
              'start', 'login', 'password', 'approver', 'seed', 'timings',
-             'memory_timings', 'flood', 'memory_check', 'values', 'upload',
-             'diagnostics', 'cleanup')
+             'memory_timings', 'value_seed', 'flood', 'value', 'memory_check',
+             'value_check', 'values', 'upload', 'diagnostics', 'cleanup')
     if tuple(steps) != order:
-        raise SystemExit('load steps do not follow ADR-0128 (j)')
-    bounds = {'timings', 'flood', 'memory_check'}
+        raise SystemExit('load steps do not follow ADR-0128 (j) and ADR-0222 (d)')
+    bounds = {'timings', 'flood', 'value', 'memory_check', 'value_check'}
     conditional = "        continue-on-error: ${{ matrix.image == 'cc-debian13' }}"
+    for identifier, block in steps.items():
+        lines = re.findall(r'^        continue-on-error:.*', block, re.M)
+        if lines != ([conditional] if identifier in bounds else []):
+            raise SystemExit(f'load has the wrong continue-on-error for {identifier}')
     if len(re.findall(r'^ *continue-on-error:', body, re.M)) != len(bounds):
         raise SystemExit('load ignores failures outside its bound steps')
-    for identifier, block in steps.items():
-        lines = [line for line in block.splitlines() if 'continue-on-error:' in line]
-        if lines != ([conditional] if identifier in bounds else []):
-            raise SystemExit('load ignores a failure outside the cc-debian13 bounds')
 
 
 def check_load_builds(steps):
@@ -263,14 +266,26 @@ def check_load_commands(steps):
     for identifier, command in commands.items():
         if command not in steps[identifier]:
             raise SystemExit('load is missing the command of step ' + identifier)
+    start = 'date +%s >"$RUNNER_TEMP/load-job-start"'
+    runner = commands['runner']
+    require_load(steps['runner'], '^          ' + re.escape(start + '\n          ' + runner) + '$',
+                 'runner must record the job start before the runner check')
+    for identifier, command in (
+        ('value_seed', 'value-seed'), ('value', 'value'), ('value_check', 'value-check'),
+    ):
+        require_load(steps[identifier], rf'^        run: bash deploy/ci/load\.sh {command}$',
+                     'missing the command of step ' + identifier)
     require_load(steps['seed'], r'^        timeout-minutes: 30$', 'wrong seed timeout')
-    for identifier in ('memory_timings', 'flood', 'memory_check', 'values'):
+    for identifier in ('memory_timings', 'value_seed', 'flood', 'value', 'memory_check',
+                       'value_check', 'values'):
         require_load(steps[identifier],
-                     r"^        if: \$\{\{ !cancelled\(\) && steps.seed.outcome == 'success' \}\}$",
-                     'missing result collection after a bound failure')
+                     r"^        if: \$\{\{ !cancelled\(\) && steps\.seed\.outcome == 'success' \}\}$",
+                     f'{identifier} must run after a bound failure unless the job is cancelled')
     require_load(steps['diagnostics'], r'^        if: failure\(\)$', 'missing failure diagnostics')
     require_load(steps['cleanup'], r'^        if: always\(\)$', 'missing unconditional cleanup')
-    require_load(steps['flood'], r'^        timeout-minutes: [1-9][0-9]*$', 'flood needs a step timeout')
+    for identifier in ('flood', 'value_seed', 'value', 'value_check'):
+        require_load(steps[identifier], r'^        timeout-minutes: [1-9][0-9]*$',
+                     f'{identifier} needs a step timeout')
 
 
 def check_load_artifacts(steps):
@@ -283,9 +298,10 @@ def check_load_artifacts(steps):
                  'upload must require the values check')
     paths = re.findall(r'^            (.+)$', upload, re.M)
     prefix = '${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/'
-    expected = [prefix + f'load-{name}.json' for name in ('seed', 'timings', 'flood', 'memory')]
+    reports = ('seed', 'timings', 'flood', 'memory', 'value')
+    expected = [prefix + f'load-{name}.json' for name in reports]
     if paths != expected:
-        raise SystemExit('load must upload only its four JSON value reports')
+        raise SystemExit('load must upload only its five JSON value reports')
     for field in ('seed_seconds', 'timings_seconds', 'logins_per_second', 'p99_seconds', 'peak'):
         if field not in steps['values']:
             raise SystemExit('load does not require all measured values')
@@ -299,6 +315,7 @@ def test_load_job():
     check_load_commands(steps)
     check_load_artifacts(steps)
     print('CI load job check passed.')
+# End of the load job checks.
 
 
 test_load_job()

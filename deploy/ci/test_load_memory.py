@@ -11,6 +11,10 @@ import unittest
 
 
 SCRIPT = pathlib.Path(__file__).with_name("load_memory.py")
+VALUE_PHASES = (
+    "value-seed", "value-precheck", "value-baseline-1", "value-round-1",
+    "value-baseline-2", "value-round-2",
+)
 
 
 def reading(**changes):
@@ -128,7 +132,7 @@ class LoadMemoryTests(unittest.TestCase):
                 self.assertFalse(result["passed"])
                 self.assertEqual(result["adr_0064_o_memory_condition"], "met")
 
-    def run_cli(self, directory, flood_text):
+    def run_cli(self, directory, flood_text, value_args=()):
         timings = directory / "timings.json"
         flood = directory / "flood.json"
         output = directory / "memory.json"
@@ -138,10 +142,85 @@ class LoadMemoryTests(unittest.TestCase):
         summary.write_text("Existing summary\n", encoding="utf-8")
         result = subprocess.run(
             [sys.executable, "-I", "-B", str(SCRIPT), str(timings), str(flood),
-             "--output", str(output)], capture_output=True, text=True, check=False,
+             *value_args, "--output", str(output)], capture_output=True, text=True, check=False,
             env=os.environ | {"GITHUB_STEP_SUMMARY": str(summary)},
         )
-        return result, json.loads(output.read_text(encoding="utf-8")), summary.read_text(encoding="utf-8")
+        artifact = json.loads(output.read_text(encoding="utf-8")) if output.exists() else None
+        return result, artifact, summary.read_text(encoding="utf-8")
+
+    def run_value_cli(self, changes=None, missing=None):
+        changes = changes or {}
+        with tempfile.TemporaryDirectory() as temp:
+            directory = pathlib.Path(temp)
+            args = []
+            for phase in VALUE_PHASES:
+                if phase == missing:
+                    continue
+                path = directory / f"{phase}.json"
+                fixture = reading(peak=120000000, current=100000000, container_id="a" * 64)
+                fixture.update(changes.get(phase, {}))
+                path.write_text(json.dumps(fixture), encoding="utf-8")
+                args.extend(("--value", f"{phase}={path}"))
+            return self.run_cli(directory, json.dumps(reading(peak=503316480)), args)
+
+    def test_value_precheck_can_set_the_whole_run_peak(self):
+        result, artifact, summary = self.run_value_cli({"value-precheck": {"peak": 530000000}})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(set(artifact["value"]), set(VALUE_PHASES))
+        self.assertEqual(artifact["value"]["value-precheck"]["peak"], 530000000)
+        self.assertEqual(artifact["flood"]["peak"], 503316480)
+        self.assertEqual(artifact["peak"], 530000000)
+        self.assertIn("whole run memory.peak: 530000000 bytes", summary)
+        self.assertIn("ADR-0064 (o) memory condition: met", summary)
+
+    def test_missing_value_phase_fails_the_check(self):
+        result, artifact, _ = self.run_value_cli(missing="value-baseline-2")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertFalse(artifact["passed"])
+        self.assertIn("value-baseline-2", result.stderr)
+
+    def test_value_current_requires_a_kernel_counter(self):
+        phase = "value-baseline-1"
+        for current, expected in ((0, 0), (str(2**63 - 1), 2**63 - 1),
+                                  (2**63, None), (str(2**63), None)):
+            with self.subTest(current=current):
+                result, artifact, summary = self.run_value_cli({phase: {"current": current}})
+                self.assertEqual(result.returncode, int(expected is None), result.stderr)
+                self.assertEqual(artifact["value"][phase]["current"], expected)
+                if expected is None:
+                    self.assertIn(f"{phase} current:", result.stderr)
+                    self.assertIn(result.stderr.strip(), summary.splitlines())
+
+    def test_round_one_reports_each_bound_that_fails_round_two(self):
+        for field, value in (("oom", 1), ("oom_kill", 1), ("max", 1),
+                             ("OOMKilled", True), ("RestartCount", 1), ("peak", 536870912)):
+            with self.subTest(field=field):
+                result, artifact, summary = self.run_value_cli({"value-round-1": {field: value}})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(artifact["value"]["value-round-1"][field], value)
+                label = "memory.peak" if field == "peak" else field
+                reported = "true" if field == "OOMKilled" else value
+                self.assertIn(f"value-round-1 {label}: {reported}", summary)
+                if field == "peak":
+                    self.assertEqual(artifact["peak"], value)
+                result, artifact, _ = self.run_value_cli({"value-round-2": {field: value}})
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(artifact["passed"])
+                self.assertIn(f"value-round-2 {label}", result.stderr)
+
+    def test_round_one_unavailable_peak_fails_the_check(self):
+        result, artifact, _ = self.run_value_cli({"value-round-1": {"peak": "unavailable"}})
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIsNone(artifact["peak"])
+        self.assertIn("value-round-1 peak: unavailable", result.stderr)
+
+    def test_round_one_checks_current_and_container_id(self):
+        for field, value in (("current", "-1"), ("container_id", "A" * 64)):
+            with self.subTest(field=field):
+                result, artifact, _ = self.run_value_cli({"value-round-1": {field: value}})
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIsNone(artifact["value"]["value-round-1"][field])
+                self.assertIn(f"value-round-1 {field}", result.stderr)
 
     def test_cli_writes_summary_and_artifact_before_failure_exit(self):
         for changes, status, condition in (({}, 0, "met"), ({"max": 1}, 1, "met"),

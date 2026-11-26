@@ -174,7 +174,11 @@ jobs:
           persist-credentials: false
       - name: Check the runner before the stack
         id: runner
-        run: python3 -I -B deploy/ci/load_flood.py runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          date +%s >"$RUNNER_TEMP/load-job-start"
+          python3 -I -B deploy/ci/load_flood.py runner
       - name: Check the CI scripts
         run: bash deploy/ci/check.sh
       - name: Prepare the disks and secrets
@@ -301,18 +305,35 @@ jobs:
         if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
         timeout-minutes: 5
         run: bash deploy/ci/load.sh memory-timings
+      - name: Seed the drafts for the value leg
+        id: value_seed
+        if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
+        timeout-minutes: 10
+        run: bash deploy/ci/load.sh value-seed
       - name: Recreate app and run the login flood
         id: flood
         if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
         timeout-minutes: 10
         continue-on-error: ${{ matrix.image == 'cc-debian13' }}
         run: bash deploy/ci/load.sh flood
-      - name: Check both memory readings and report the memory condition
+      - name: Run the value leg
+        id: value
+        if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
+        timeout-minutes: 10
+        continue-on-error: ${{ matrix.image == 'cc-debian13' }}
+        run: bash deploy/ci/load.sh value
+      - name: Check the memory readings and report the memory condition
         id: memory_check
         if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
         timeout-minutes: 5
         continue-on-error: ${{ matrix.image == 'cc-debian13' }}
         run: bash deploy/ci/load.sh memory-check
+      - name: Check the value leg and report its results
+        id: value_check
+        if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
+        timeout-minutes: 5
+        continue-on-error: ${{ matrix.image == 'cc-debian13' }}
+        run: bash deploy/ci/load.sh value-check
       - name: Require the values from each leg
         id: values
         if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
@@ -324,25 +345,101 @@ jobs:
           import json
           import math
           import os
+          import re
           import sys
           from pathlib import Path
+
+
+          class MissingValue(ValueError):
+              pass
+
+
+          def require(report, field, valid, label):
+              if not isinstance(report, dict) or field not in report or not valid(report[field]):
+                  raise MissingValue(f"{label} {field}")
+              return report[field]
+
+
+          def count(value):
+              return type(value) is int and value >= 0
+
+
+          def container_id(value):
+              return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+
+
+          def require_memory_reading(reading, phase):
+              if not isinstance(reading, dict):
+                  raise MissingValue(f"{phase} reading")
+              for field in ("peak", "anon", "file", "limit", "oom", "oom_kill", "max",
+                            "RestartCount"):
+                  require(reading, field, count, phase)
+              require(reading, "OOMKilled", lambda value: type(value) is bool, phase)
+
+
+          def require_value_readings(memory):
+              readings = require(memory, "value", lambda value: isinstance(value, dict),
+                                 "load-memory.json")
+              for suffix in ("seed", "precheck", "baseline-1", "round-1",
+                             "baseline-2", "round-2"):
+                  phase = f"value-{suffix}"
+                  reading = readings.get(phase)
+                  require_memory_reading(reading, phase)
+                  require(reading, "current", count, phase)
+                  require(reading, "container_id", container_id, phase)
+
+
+          def require_value_results(report):
+              label = "load-value.json"
+              require(report, "passed", lambda value: type(value) is bool, label)
+              require(report, "failures", lambda value: isinstance(value, list)
+                      and all(isinstance(item, str) for item in value), label)
+              for field in ("job_elapsed_s", "leg_elapsed_s"):
+                  require(report, field, count, label)
+              rounds = require(report, "rounds", lambda value: isinstance(value, list)
+                               and len(value) == 2, label)
+              numbers = set()
+              for result in rounds:
+                  number = require(result, "round", lambda value: count(value)
+                                   and value in (1, 2), label)
+                  numbers.add(number)
+                  round_label = f"{label} round {number}"
+                  require(result, "container_id", container_id, round_label)
+                  for field in ("peak", "body_bytes", "mem_available_min_kib", "reference_anon"):
+                      require(result, field, count, round_label)
+                  require(result, "barrier_anon", lambda value: value is None or count(value),
+                          round_label)
+                  require(result, "run_statistic", lambda value: count(value)
+                          or (type(value) is float and math.isfinite(value) and value >= 0),
+                          round_label)
+                  require(result, "overlap_margin",
+                          lambda value: value is None or type(value) is int, round_label)
+              if numbers != {1, 2}:
+                  raise MissingValue("the results for both rounds")
+
 
           try:
               state = Path(os.environ["CI_STATE"])
               reports = {name: json.loads((state / f"load-{name}.json").read_text(encoding="utf-8"))
-                         for name in ("seed", "timings", "flood", "memory")}
+                         for name in ("seed", "timings", "flood", "memory", "value")}
               timings = reports["timings"]["timings_seconds"]
               flood, memory = reports["flood"], reports["memory"]
+              require_value_readings(memory)
+              require_value_results(reports["value"])
+              for phase in ("timings", "flood"):
+                  require_memory_reading(memory.get(phase), phase)
               values = [reports["seed"]["seed_seconds"], reports["timings"]["seed_seconds"],
                         *(timings[name] for name in ("ApproveVersion", "CreateVersion", "GetVersion")),
-                        flood["logins_per_second"], flood["p99_seconds"],
-                        memory["timings"]["peak"], memory["flood"]["peak"], memory["peak"]]
+                        flood["logins_per_second"], flood["p99_seconds"], memory["peak"]]
               if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
                      for value in values):
                   raise ValueError("invalid measurement")
               if memory["adr_0064_o_memory_condition"] not in ("met", "not met"):
                   raise ValueError("missing memory condition")
-          except Exception:
+          except MissingValue as error:
+              print(f"CI load has no valid value for {error}.", file=sys.stderr)
+              sys.exit(1)
+          except (OSError, ValueError, TypeError, KeyError, OverflowError):
               print("CI load did not write all required JSON values.", file=sys.stderr)
               sys.exit(1)
           print("CI load wrote all required JSON values.")
@@ -359,6 +456,7 @@ jobs:
             ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-timings.json
             ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-flood.json
             ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-memory.json
+            ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-value.json
       - name: Show load failure diagnostics
         id: diagnostics
         if: failure()

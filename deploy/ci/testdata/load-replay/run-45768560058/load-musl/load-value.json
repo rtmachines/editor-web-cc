@@ -1,0 +1,26 @@
+{
+  "passed": false,
+  "failures": [
+    "round 2 reading reached the ceiling of 384 MiB"
+  ],
+  "rounds": [
+    {
+      "round": 1,
+      "container_id": "51c14e4e6b0c4c8174dbdb1e0a22462b4c59f3cffaf3aa9d658169acb4a01b7e",
+      "peak": 382672896,
+      "body_bytes": 16743514,
+      "run_statistic": 87920640.0,
+      "mem_available_min_kib": 14580420
+    },
+    {
+      "round": 2,
+      "container_id": "f3eb649f41f54bdaddc20d9fee4872e2b5602b7e075eed2ffe746fc641164063",
+      "peak": 418004992,
+      "body_bytes": 3033541,
+      "run_statistic": 96775168.0,
+      "mem_available_min_kib": 14392768
+    }
+  ],
+  "job_elapsed_s": 493,
+  "leg_elapsed_s": 13
+}

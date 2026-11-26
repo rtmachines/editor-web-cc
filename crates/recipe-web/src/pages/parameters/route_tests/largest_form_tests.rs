@@ -28,7 +28,7 @@ use crate::test_support::plant::{ENGLISH, World, world};
 /// The number of array levels of the type. It equals `json.max_depth`.
 const LEVELS: usize = 32;
 /// The number of outer levels with two elements. Their product is `budget.leaves_per_parameter`.
-const WIDE_LEVELS: usize = 14;
+pub(super) const WIDE_LEVELS: usize = 14;
 /// The number of leaves: 2 to the power of `WIDE_LEVELS`.
 pub(super) const LEAVES: usize = 1 << WIDE_LEVELS;
 /// The first index of every level. Both indexes of a level have two digits.
@@ -58,9 +58,9 @@ const RECIPE_ID: Uuid = Uuid::from_u128(0x7357_0004_0000_0000_0000_0000_0f44_000
 /// The first field of the identifier of a primitive row of the text check.
 const ROW_BASE: u128 = 0x7357_0013_0000_0000_0000_0000_0f44_0000;
 
-/// Return the indexes of the level `level`: 10 and 11 for an outer level, and 10 for the rest.
-fn indexes(level: usize) -> std::ops::RangeInclusive<usize> {
-    let last = if level < WIDE_LEVELS {
+/// Return the indexes of the level `level`: 10 and 11 for each of the first `wide` levels, else 10.
+fn indexes(level: usize, wide: usize) -> std::ops::RangeInclusive<usize> {
+    let last = if level < wide {
         SECOND_INDEX
     } else {
         FIRST_INDEX
@@ -68,12 +68,17 @@ fn indexes(level: usize) -> std::ops::RangeInclusive<usize> {
     FIRST_INDEX..=last
 }
 
+/// Return the leaf path of the leaf number `leaf` with `WIDE_LEVELS` wide levels.
+pub(super) fn leaf_path(leaf: usize) -> String {
+    leaf_path_of(leaf, WIDE_LEVELS)
+}
+
 /// Return the concrete leaf path of the leaf number `leaf`, for example `[10][11]...[10]`.
 ///
-/// The binary digits of `leaf` pick the index of each outer level. The other levels have one
-/// index, so every path has 32 segments of 4 bytes.
-pub(super) fn leaf_path(leaf: usize) -> String {
-    let bits = format!("{leaf:0WIDE_LEVELS$b}");
+/// The binary digits of `leaf` pick the index of each of the `wide` outer levels. The other
+/// levels have one index, so every path has 32 segments of 4 bytes.
+pub(super) fn leaf_path_of(leaf: usize, wide: usize) -> String {
+    let bits = format!("{leaf:0wide$b}");
     (0..LEVELS)
         .map(|level| {
             let second = bits.as_bytes().get(level) == Some(&b'1');
@@ -83,9 +88,9 @@ pub(super) fn leaf_path(leaf: usize) -> String {
 }
 
 /// Return the text of the type: 32 `ARRAY` prefixes and the base `LDT`.
-fn type_text() -> String {
+fn type_text(wide: usize) -> String {
     let prefixes: String = (0..LEVELS)
-        .map(|level| format!("ARRAY[{}..{}] OF ", FIRST_INDEX, indexes(level).end()))
+        .map(|level| format!("ARRAY[{}..{}] OF ", FIRST_INDEX, indexes(level, wide).end()))
         .collect();
     format!("{prefixes}LDT")
 }
@@ -102,19 +107,30 @@ pub(super) fn ldt_count(text: &str) -> i64 {
 }
 
 /// Return the nested JSON that opens the level `level`. `next` is the number of the next leaf.
-fn nested(level: usize, next: &mut usize) -> Value {
+pub(super) fn nested(level: usize, next: &mut usize, wide: usize) -> Value {
     if level == LEVELS {
         let count = ldt_count(&value_text(*next));
         *next = next.checked_add(1).unwrap();
         return json!(count);
     }
     let deeper = level.checked_add(1).unwrap();
-    Value::Array(indexes(level).map(|_index| nested(deeper, next)).collect())
+    Value::Array(
+        indexes(level, wide)
+            .map(|_index| nested(deeper, next, wide))
+            .collect(),
+    )
+}
+
+/// Return the pairs of the edit form of `BIG` with `WIDE_LEVELS` wide levels.
+pub(super) fn form_pairs() -> Vec<(String, String)> {
+    form_pairs_of(WIDE_LEVELS)
 }
 
 /// Return every pair of the edit form of `BIG` with the new type, the values, and the limits.
-pub(super) fn form_pairs() -> Vec<(String, String)> {
-    let text = type_text();
+///
+/// The type has `wide` array levels with two elements. The form has `2^wide` leaves.
+pub(super) fn form_pairs_of(wide: usize) -> Vec<(String, String)> {
+    let text = type_text(wide);
     let mut pairs: Vec<(String, String)> = [
         ("row_version", "1"),
         ("unit_path", "U1"),
@@ -129,8 +145,8 @@ pub(super) fn form_pairs() -> Vec<(String, String)> {
     .collect();
     pairs.push(("type".to_owned(), text.clone()));
     pairs.push(("value_type".to_owned(), text));
-    for leaf in 0..LEAVES {
-        let path = leaf_path(leaf);
+    for leaf in 0..(1_usize << wide) {
+        let path = leaf_path_of(leaf, wide);
         pairs.push((format!("value{path}"), value_text(leaf)));
         pairs.push((format!("limits[{leaf}].leaf_path"), path));
         pairs.push((format!("limits[{leaf}].min"), MIN_TEXT.to_owned()));
@@ -378,7 +394,7 @@ async fn largest_edit_form_fits_the_value_limit() {
         .parameters_of(RecipeVersionId::from(VERSION_ID));
     assert_eq!(stored.len(), 1);
     let parameter = stored.first().unwrap();
-    assert_eq!(parameter.value.as_json(), &nested(0, &mut 0));
+    assert_eq!(parameter.value.as_json(), &nested(0, &mut 0, WIDE_LEVELS));
     assert_eq!(parameter.limits.len(), LEAVES);
 }
 

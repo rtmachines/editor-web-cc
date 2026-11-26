@@ -1,6 +1,6 @@
 # ADR-0128: CI jobs of the Load level and the End-to-end smoke
 
-Status: Accepted. Amends ADR-0064 (o). Amended by ADR-0129 (item (w) counts the field `stage` of the log line)
+Status: Accepted. Amends ADR-0064 (o). Amended by ADR-0129 (item (w) counts the field `stage` of the log line). Amended by ADR-0222 (items (j) and (k): the order of the steps). Amended by ADR-0222 (item (y): the readings of the value leg). Amended by ADR-0222 (item (z): the round 1 reading only reports). Amended by ADR-0222 (item (aa): the peak of the whole run and the role of `anon`). Amended by ADR-0222 (item (ac): the value leg)
 Date: 2026-11-05
 Deciders: project owner
 

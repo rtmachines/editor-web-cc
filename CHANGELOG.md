@@ -14,6 +14,8 @@ This file records the notable changes of the recipe editor. The format follows [
   A test checks that the section "Upgrade" has 18 Bash blocks.
 - The CI job `pitr-recovery` adds a fourth recovery run in its `refusals` step.
   The run checks for an early end to WAL replay on a copy of the archive with one damaged record.
+- The load job adds a value leg of two rounds of four concurrent value saves (ADR-0222).
+  The job checks the memory ceiling of 384 MiB on round 2 of the musl leg and only reports round 1 and the `cc-debian13` leg.
 
 ### Changed
 

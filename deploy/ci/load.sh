@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Run the login flood and collect both memory readings (ADR-0128).
-# Use memory-timings, flood, and memory-check for separate workflow steps.
-# Without an argument, collect the first reading and run all remaining steps.
+# Run the login flood and the value load steps (ADR-0128, ADR-0222).
+# Without an argument, run the flood and check the timings and flood readings.
 set -euo pipefail
 umask 077
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -33,21 +32,25 @@ locate_app() {
 }
 
 read_memory() {
-  local phase=$1 reading oom maximum killed restarts
+  local phase=$1 reading current oom maximum killed restarts
   locate_app
   # memory_cgroup records the shared fields. The Python checker owns every bound.
   reading=$(memory_cgroup app "$APP_CGROUP" "$APP_LIMIT") || true
+  current=$(sudo -n cat "$APP_CGROUP/memory.current" 2>/dev/null) || current=unavailable
+  [[ $current =~ ^[0-9]+$ ]] || current=unavailable
   oom=$(sudo -n awk '$1 == "oom" { print $2 }' "$APP_CGROUP/memory.events" 2>/dev/null) || oom=unavailable
   maximum=$(sudo -n awk '$1 == "max" { print $2 }' "$APP_CGROUP/memory.events" 2>/dev/null) || maximum=unavailable
   killed=$(docker inspect --format '{{.State.OOMKilled}}' "$APP_ID" 2>/dev/null) || killed=unavailable
   restarts=$(docker inspect --format '{{.RestartCount}}' "$APP_ID" 2>/dev/null) || restarts=unavailable
-  python3 -I -B - "$CI_STATE/load-memory-$phase.json" "$reading" "$oom" "$maximum" "$killed" "$restarts" <<'PY'
+  python3 -I -B - "$CI_STATE/load-memory-$phase.json" "$reading" \
+    "$oom" "$maximum" "$killed" "$restarts" "$current" "$APP_ID" <<'PY'
 import json
 import pathlib
 import sys
 
 fields = dict(part.split("=", 1) for part in sys.argv[2].splitlines()[0].split()[2:])
-fields.update(zip(("oom", "max", "OOMKilled", "RestartCount"), sys.argv[3:]))
+extra = ("oom", "max", "OOMKilled", "RestartCount", "current", "container_id")
+fields.update(zip(extra, sys.argv[3:]))
 pathlib.Path(sys.argv[1]).write_text(json.dumps(fields) + "\n", encoding="utf-8")
 PY
 }
@@ -130,13 +133,127 @@ flood() {
 check_memory() {
   python3 -I -B "$GITHUB_WORKSPACE/deploy/ci/load_memory.py" \
     "$CI_STATE/load-memory-timings.json" "$CI_STATE/load-memory-flood.json" \
-    --output "$CI_STATE/load-memory.json"
+    --output "$CI_STATE/load-memory.json" "$@"
+}
+
+check_value_memory() {
+  local phase
+  local -a readings=()
+  for phase in value-seed value-precheck value-baseline-1 value-round-1 \
+    value-baseline-2 value-round-2
+  do
+    readings+=(--value "$phase=$CI_STATE/load-memory-$phase.json")
+  done
+  check_memory "${readings[@]}"
+}
+
+seed_value() {
+  date +%s >"$CI_STATE/load-value-leg-start"
+  python3 -I -B "$GITHUB_WORKSPACE/deploy/ci/load_seed.py" value
+  read_memory value-seed
+}
+
+value_client() {
+  local command=$1
+  shift
+  python3 -I -B "$GITHUB_WORKSPACE/deploy/ci/load_value.py" \
+    "$command" --ci-state "$CI_STATE" "$@"
+}
+
+read_value_versions() {
+  local phase=$1 versions status
+  if versions=$(sql -q 2>/dev/null <<'SQL'
+SELECT pg_catalog.json_build_object(
+    'row_versions', pg_catalog.json_object_agg(r.reference_number, v.row_version)
+)
+FROM public.recipe_version v
+JOIN public.recipe r ON r.id = v.recipe_id
+WHERE r.reference_number IN ('LOAD-V1', 'LOAD-V2', 'LOAD-V3', 'LOAD-V4', 'LOAD-V5')
+  AND v.number = 1 AND v.status = 'draft' AND v.deleted_at IS NULL
+HAVING count(*) = 5;
+SQL
+  ); then
+    [[ -n $versions ]] || fail "expected five draft versions for value phase $phase"
+    printf '%s\n' "$versions" >"$CI_STATE/load-value-versions-$phase.json"
+  else
+    status=$?
+    printf 'CI: could not read draft versions for value phase %s\n' "$phase" >&2
+    return "$status"
+  fi
+}
+
+baseline_anon() {
+  python3 -I -B - "$CI_STATE/load-memory-value-baseline-$1.json" <<'PY'
+import json
+import pathlib
+import sys
+
+try:
+    reading = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+    anon = reading["anon"]
+    if not isinstance(anon, str) or not anon.isascii() or not anon.isdecimal():
+        raise ValueError
+except (OSError, ValueError, KeyError, TypeError):
+    sys.exit("CI: the value baseline has no valid anon reading")
+print(anon)
+PY
+}
+
+value_round() {
+  local number=$1 anon client_status=0 reading_status=0 versions_status=0
+  recreate_app
+  read_memory "value-baseline-$number"
+  anon=$(baseline_anon "$number")
+  value_client round --round "$number" --cgroup "$APP_CGROUP" --reference-anon "$anon" \
+    --url https://localhost:8443 --cacert "$CI_STATE/root.crt" || client_status=$?
+  # Read memory and draft versions even after a client failure. Return the first failure.
+  (read_memory "value-round-$number") || reading_status=$?
+  (read_value_versions "$number") || versions_status=$?
+  if (( client_status != 0 )); then
+    return "$client_status"
+  fi
+  if (( reading_status != 0 )); then
+    return "$reading_status"
+  fi
+  return "$versions_status"
+}
+
+value_precheck() {
+  local number
+  for number in 1 2
+  do
+    value_client single --round "$number" --reference LOAD-V5 \
+      --url https://localhost:8443 --cacert "$CI_STATE/root.crt" || return "$?"
+  done
+  read_value_versions precheck || return "$?"
+  value_client check-precheck
+}
+
+run_value() {
+  local precheck_status=0 reading_status=0
+  (value_precheck) || precheck_status=$?
+  # Keep the pre-check reading after a failure. Return the first failure.
+  (read_memory value-precheck) || reading_status=$?
+  if (( precheck_status != 0 )); then
+    return "$precheck_status"
+  fi
+  if (( reading_status != 0 )); then
+    return "$reading_status"
+  fi
+  value_round 1
+  value_client check-round --round 1
+  value_round 2
 }
 
 case ${1:-all} in
   memory-timings) read_memory timings ;;
+  value-seed) seed_value ;;
   flood) flood ;;
-  memory-check) check_memory ;;
+  value) run_value ;;
+  memory-check) check_value_memory ;;
+  value-check)
+    value_client check --job-start "$RUNNER_TEMP/load-job-start" --summary "$GITHUB_STEP_SUMMARY"
+    ;;
   all)
     read_memory timings
     status=0
@@ -147,5 +264,5 @@ case ${1:-all} in
     if (( status == 0 )); then status=$memory_status; fi
     exit "$status"
     ;;
-  *) fail "usage: load.sh [memory-timings|flood|memory-check|all]" ;;
+  *) fail "usage: load.sh [memory-timings|value-seed|flood|value|memory-check|value-check|all]" ;;
 esac

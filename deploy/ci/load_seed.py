@@ -1,8 +1,8 @@
-"""Seed the load draft through HTTP and check its database counts (ADR-0128 (m) to (o)).
+"""Seed the load drafts through HTTP (ADR-0128 (m) to (o), ADR-0222 (d)).
 
 Run with CI_STATE after the administrator changes its password.
-The fresh stack receives one machine, one UDT, and one recipe.
-The file load-seed.json holds the draft path, counts, and seed_seconds for the timings.
+The default command writes the timings draft and counts to load-seed.json.
+The value command writes five drafts and the session to load-value-state.json.
 """
 
 import importlib.util
@@ -12,6 +12,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -56,7 +57,7 @@ FROM draft d;
 
 
 class SeedCheckError(ValueError):
-    """Report a count failure without database output or credentials."""
+    """Report a seed failure without database output or credentials."""
 
 
 def define_udt_body():
@@ -87,18 +88,26 @@ def create(client, page, action, fields, destination):
         raise HttpCheckError("the seed command did not redirect to its page", status, body)
 
 
+def create_machine(client, machine):
+    create(client, "/machines/new", "/machines",
+           {"code": machine, "name": "Load machine", "plc_platform": "CodesysIec",
+            "string_encoding": "Latin1",
+            "main_unit_name": "Line"}, f"/machines/{machine}")
+
+
+def create_draft(client, machine, reference, draft_path):
+    create(client, "/recipes/new", "/recipes",
+           {"machine_code": machine, "reference_number": reference,
+            "name": "Load recipe", "change_note": "Seed the load draft"}, draft_path)
+
+
 def seed(client, *, clock=time.monotonic):
     """Create the draft and report each completed batch of AddParameter requests."""
     started = clock()
-    create(client, "/machines/new", "/machines",
-           {"code": MACHINE, "name": "Load machine", "plc_platform": "CodesysIec",
-            "string_encoding": "Latin1",
-            "main_unit_name": "Line"}, f"/machines/{MACHINE}")
+    create_machine(client, MACHINE)
     types = f"/machines/{MACHINE}/types"
     create(client, types + "/new", types, define_udt_body(), types + f"/{UDT}")
-    create(client, "/recipes/new", "/recipes",
-           {"machine_code": MACHINE, "reference_number": REFERENCE,
-            "name": "Load recipe", "change_note": "Seed the load draft"}, DRAFT_PATH)
+    create_draft(client, MACHINE, REFERENCE, DRAFT_PATH)
     action = DRAFT_PATH + "/parameters"
     client.form(action + "/new?unit=U1", action)
     for number in range(1, PARAMETERS + 1):
@@ -107,6 +116,41 @@ def seed(client, *, clock=time.monotonic):
             print(f"Seed: {number} AddParameter requests, {clock() - started:.3f} s elapsed.", flush=True)
     return {"reference": REFERENCE, "draft_path": DRAFT_PATH,
             "row_version": client.row_version, "seed_seconds": clock() - started}
+
+
+def seed_value_draft(client, number):
+    machine = f"M900000{number + 1}"
+    reference = f"LOAD-V{number}"
+    draft_path = f"/recipes/{reference}/versions/1"
+    create_machine(client, machine)
+    create_draft(client, machine, reference, draft_path)
+    unit_path, ordinal = "U1", 1
+    action = draft_path + "/parameters"
+    client.form(f"{action}/new?unit={unit_path}", action)
+    status, _, body = client.post(action, {
+        "unit_path": unit_path, "tag": "BIG", "name_en": "Big",
+        "description_en": "Load seed parameter", "type": "LDT", "value_type": "LDT",
+        "ordinal": str(ordinal), "value": "LDT#1970-01-01-00:00:00.000000001",
+    }, draft=True)
+    uuid = r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"
+    keys = re.findall(rf'href="{re.escape(action)}/({uuid})"', body)
+    if len(keys) != 1:
+        raise HttpCheckError("expected one link to the seeded parameter", status, body)
+    return {"reference": reference, "machine": machine, "key": keys[0],
+            "row_version": client.row_version, "unit_path": unit_path, "ordinal": ordinal}
+
+
+def seed_value(client, state):
+    drafts = [seed_value_draft(client, number) for number in range(1, 6)]
+    if len({draft["key"] for draft in drafts}) != len(drafts):
+        raise SeedCheckError("The value seed returned duplicate parameter keys.")
+    cookie = "; ".join(f"{key}={value}" for key, value in client.cookies.items())
+    result = {"cookie": cookie, "csrf_token": client.csrf_token, "drafts": drafts}
+    # Replace the state file only after all five requests to add parameters pass.
+    with tempfile.TemporaryDirectory(dir=state) as directory:
+        path = pathlib.Path(directory) / "load-value-state.json"
+        path.write_text(json.dumps(result) + "\n", encoding="utf-8")
+        path.replace(state / path.name)
 
 
 def check_counts(counts):
@@ -132,11 +176,15 @@ def read_counts(reference):
     return dict(zip(EXPECTED_COUNTS, map(int, result.stdout.strip().split("|"))))
 
 
-def main():
+def main(*, value=False):
     os.umask(0o077)
     state = pathlib.Path(os.environ["CI_STATE"])
     client = Client(state)
     client.login("ci-admin", "new_password")
+    if value:
+        seed_value(client, state)
+        print("Value seed completed for five drafts.")
+        return
     result = seed(client)
     counts = read_counts(result["reference"])
     check_counts(counts)
@@ -145,9 +193,14 @@ def main():
     print(f"Seed completed in {result['seed_seconds']:.3f} s. Draft counts passed.")
 
 
-def cli():
+def cli(args=None):
+    if args is None:
+        args = sys.argv[1:]
+    if args not in ([], ["value"]):
+        print("Usage: load_seed.py [value]", file=sys.stderr)
+        return 2
     try:
-        main()
+        main(value=bool(args))
         return 0
     except (HttpCheckError, SeedCheckError) as error:
         print(str(error), file=sys.stderr)

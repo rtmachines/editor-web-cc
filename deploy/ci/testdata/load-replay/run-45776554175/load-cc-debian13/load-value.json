@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "failures": [],
+  "rounds": [
+    {
+      "round": 1,
+      "container_id": "9cab838f9575ac5f12e41d3c4e52a9c23246ffd99f7d7fb041d61ee3e6a14fef",
+      "peak": 338546688,
+      "body_bytes": 16743514,
+      "run_statistic": 83082240.0,
+      "mem_available_min_kib": 14364684
+    },
+    {
+      "round": 2,
+      "container_id": "0446c76df4165a2317fd7f967c562daa1c1dec048ef2556056d9e1d97f08e2a4",
+      "peak": 275632128,
+      "body_bytes": 3033541,
+      "run_statistic": 67395584.0,
+      "mem_available_min_kib": 14279760
+    }
+  ],
+  "job_elapsed_s": 527,
+  "leg_elapsed_s": 15
+}

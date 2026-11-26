@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import pathlib
+import stat
 import tempfile
 import unittest
 import urllib.parse
@@ -63,6 +64,93 @@ class LoadSeedTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             result = self.seed.seed(self.client, clock=Mock(side_effect=range(20)))
         return result, output.getvalue()
+
+    def value_request(self, method, path, body, headers):
+        fields = urllib.parse.parse_qs(body.decode()) if body else {}
+        self.sent.append((method, path, fields, headers))
+        if (method, path) == ("GET", "/login"):
+            self.answer = response(body='<form action="/login">'
+                                        '<input name="csrf_pre" value="pre-token"></form>')
+        elif path == "/login":
+            self.answer = response(303, headers=[("Location", "/recipes"),
+                                    ("Set-Cookie", "__Host-recipe_session=seed-session")])
+        elif method == "GET":
+            action = path.split("?")[0].removesuffix("/new")
+            version = 10 + int(path.split("/")[2][-1]) if "?unit=U1" in path else None
+            self.answer = form(action, version)
+        elif path == "/machines":
+            destination = f"/machines/{fields['code'][0]}"
+            self.answer = response(303, headers=[("Location", destination)])
+        elif path == "/recipes":
+            destination = f"/recipes/{fields['reference_number'][0]}/versions/1"
+            self.answer = response(303, headers=[("Location", destination)])
+        else:
+            number = int(path.split("/")[2][-1])
+            key = f"00000000-0000-4000-8000-{number:012d}"
+            trigger = json.dumps({"rowVersion": 11 + number})
+            self.answer = response(body=f'<tr><td><a href="{path}/{key}" autofocus>BIG</a>'
+                                        '</td></tr>', headers=[("HX-Trigger", trigger)])
+
+    def run_value_seed(self):
+        self.request = self.value_request
+        (self.state / "new_password").write_text("seed-password\n", encoding="ascii")
+        with patch.dict("os.environ", {"CI_STATE": str(self.state)}), \
+                patch.object(self.seed, "Client", return_value=self.client), \
+                patch("sys.argv", ["load_seed.py", "value"]), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()) as errors:
+            status = self.seed.cli()
+        return status, errors.getvalue()
+
+    def test_value_seed_sends_five_machine_recipe_and_ldt_parameter_requests(self):
+        status, errors = self.run_value_seed()
+        posts = [(path, fields, headers) for method, path, fields, headers in self.sent
+                 if method == "POST"]
+        self.assertEqual(len(posts), 16)
+        self.assertEqual(posts[0][:2], ("/login", {"login": ["ci-admin"],
+                         "password": ["seed-password"], "csrf_pre": ["pre-token"]}))
+        for number in range(1, 6):
+            machine = f"M900000{number + 1}"
+            reference = f"LOAD-V{number}"
+            start = 1 + (number - 1) * 3
+            machine_post, recipe_post, parameter_post = posts[start:start + 3]
+            self.assertEqual(machine_post[:2], ("/machines", {
+                "code": [machine], "name": ["Load machine"], "plc_platform": ["CodesysIec"],
+                "string_encoding": ["Latin1"], "main_unit_name": ["Line"],
+                "csrf_token": ["seed-token"],
+            }))
+            self.assertEqual(recipe_post[:2], ("/recipes", {
+                "machine_code": [machine], "reference_number": [reference],
+                "name": ["Load recipe"], "change_note": ["Seed the load draft"],
+                "csrf_token": ["seed-token"],
+            }))
+            self.assertEqual(parameter_post[:2], (f"/recipes/{reference}/versions/1/parameters", {
+                "unit_path": ["U1"], "tag": ["BIG"], "name_en": ["Big"],
+                "description_en": ["Load seed parameter"], "type": ["LDT"], "value_type": ["LDT"],
+                "ordinal": ["1"], "value": ["LDT#1970-01-01-00:00:00.000000001"],
+                "csrf_token": ["seed-token"], "row_version": [str(10 + number)],
+            }))
+            self.assertEqual(parameter_post[2]["HX-Request"], "true")
+            for _, _, headers in (machine_post, recipe_post, parameter_post):
+                self.assertEqual(headers["Cookie"], "__Host-recipe_session=seed-session")
+        self.assertEqual(status, 0, errors)
+
+    def test_value_seed_writes_private_state_with_five_distinct_drafts(self):
+        path = self.state / "load-value-state.json"
+        path.touch()
+        path.chmod(0o644)
+        status, errors = self.run_value_seed()
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {
+            "cookie": "__Host-recipe_session=seed-session", "csrf_token": "seed-token",
+            "drafts": [
+                {"reference": f"LOAD-V{number}", "machine": f"M900000{number + 1}",
+                 "key": f"00000000-0000-4000-8000-{number:012d}",
+                 "row_version": 11 + number, "unit_path": "U1", "ordinal": 1}
+                for number in range(1, 6)
+            ],
+        })
+        self.assertEqual(status, 0, errors)
 
     def test_seed_defines_codesys_udt_with_eight_array_members(self):
         self.run_seed()
@@ -184,7 +272,7 @@ class LoadSeedTests(unittest.TestCase):
                               (OSError("password-like-value"), "CI load seed failed.")):
             with patch.object(self.seed, "main", side_effect=error), \
                     contextlib.redirect_stderr(io.StringIO()) as output:
-                self.assertEqual(self.seed.cli(), 1)
+                self.assertEqual(self.seed.cli([]), 1)
             self.assertIn(wanted, output.getvalue())
             self.assertNotIn("password-like-value", output.getvalue())
 

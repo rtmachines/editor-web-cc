@@ -1,0 +1,110 @@
+{
+  "timings": {
+    "peak": 170340352,
+    "limit": 536870912,
+    "anon": 164786176,
+    "file": 4096,
+    "oom": 0,
+    "oom_kill": 0,
+    "max": 0,
+    "RestartCount": 0,
+    "OOMKilled": false
+  },
+  "flood": {
+    "peak": 109748224,
+    "limit": 536870912,
+    "anon": 103596032,
+    "file": 0,
+    "oom": 0,
+    "oom_kill": 0,
+    "max": 0,
+    "RestartCount": 0,
+    "OOMKilled": false
+  },
+  "value": {
+    "value-seed": {
+      "peak": 170340352,
+      "limit": 536870912,
+      "anon": 164786176,
+      "file": 4096,
+      "oom": 0,
+      "oom_kill": 0,
+      "max": 0,
+      "RestartCount": 0,
+      "OOMKilled": false,
+      "current": 166354944,
+      "container_id": "6c661ce1275fb76ef30c53556483be76f93d5595c6c9110213b9948cad33bc4f"
+    },
+    "value-precheck": {
+      "peak": 270696448,
+      "limit": 536870912,
+      "anon": 264482816,
+      "file": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "max": 0,
+      "RestartCount": 0,
+      "OOMKilled": false,
+      "current": 266309632,
+      "container_id": "fd82021603c50b2ef0710f29463c47d8dbd7fb7b3b1799d4b3ee870c77aecccc"
+    },
+    "value-baseline-1": {
+      "peak": 22138880,
+      "limit": 536870912,
+      "anon": 5144576,
+      "file": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "max": 0,
+      "RestartCount": 0,
+      "OOMKilled": false,
+      "current": 5738496,
+      "container_id": "b60b60dc1d0ebec8284a31b36c32d95702980239656cda8d01fb5b6578330fa8"
+    },
+    "value-round-1": {
+      "peak": 400224256,
+      "limit": 536870912,
+      "anon": 313868288,
+      "file": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "max": 0,
+      "RestartCount": 0,
+      "OOMKilled": false,
+      "current": 315351040,
+      "container_id": "b60b60dc1d0ebec8284a31b36c32d95702980239656cda8d01fb5b6578330fa8"
+    },
+    "value-baseline-2": {
+      "peak": 22220800,
+      "limit": 536870912,
+      "anon": 5165056,
+      "file": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "max": 0,
+      "RestartCount": 0,
+      "OOMKilled": false,
+      "current": 6242304,
+      "container_id": "a2ba8edeaad93e35b0cbc04df11f6fd0d8b87887bb46256c70b1cfd9af5de2dc"
+    },
+    "value-round-2": {
+      "peak": 293281792,
+      "limit": 536870912,
+      "anon": 289820672,
+      "file": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "max": 0,
+      "RestartCount": 0,
+      "OOMKilled": false,
+      "current": 291319808,
+      "container_id": "a2ba8edeaad93e35b0cbc04df11f6fd0d8b87887bb46256c70b1cfd9af5de2dc"
+    }
+  },
+  "peak": 400224256,
+  "container_app_memory": 536870912,
+  "soak_memory_ceiling": 402653184,
+  "adr_0064_o_memory_condition": "met",
+  "passed": true,
+  "errors": []
+}
