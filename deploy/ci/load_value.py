@@ -87,6 +87,17 @@ def remaining(deadline):
     return seconds
 
 
+def send_body(sock, body, deadline):
+    """Send at most 1 MiB per write and check the deadline after partial writes."""
+    while body:
+        sock.settimeout(remaining(deadline))
+        sent = sock.send(body[:1024 * 1024])
+        if sent == 0:
+            raise OSError
+        body = body[sent:]
+    remaining(deadline)
+
+
 class AnswerSocket(io.RawIOBase):
     """Use the same deadline for all reads, including HTTP headers and chunk framing."""
 
@@ -131,6 +142,10 @@ def read_fields(response):
     return result
 
 
+def missed_barrier(number, reference):
+    return f"round {number}: request {reference} did not reach the barrier"
+
+
 class DraftBody:
     def __init__(self, round_number, draft, body):
         self.bytes = body
@@ -143,7 +158,7 @@ class DraftBody:
         }
 
     def barrier_error(self):
-        return f"round {self.answer['round']}: request {self.reference} did not reach the barrier"
+        return missed_barrier(self.answer["round"], self.reference)
 
 
 def draft_bodies(round_number, drafts, references):
@@ -219,17 +234,14 @@ class ValueSender:
                     self.send_headers(sock, draft, deadline)
                     body = memoryview(draft.bytes)
                     if barrier is not None:
-                        sock.settimeout(remaining(deadline))
-                        sock.sendall(body[:-1])
-                        remaining(deadline)
+                        send_body(sock, body[:-1], deadline)
                         at_barrier = True
                         deadline = barrier.arrive(draft.reference)
                         if deadline is None:
                             answer["error"] = barrier.failure
                             return
                         body = body[-1:]
-                    sock.settimeout(remaining(deadline))
-                    sock.sendall(body)
+                    send_body(sock, body, deadline)
                     answer["last_byte_s"] = time.monotonic() - start
                     self.receive(sock, deadline, answer)
                     remaining(deadline)
@@ -277,18 +289,25 @@ def read_anon(cgroup, timeout):
     return int(match[1]) if match else None
 
 
+def missing_barrier_anon(number):
+    return f"round {number} barrier_anon is missing or invalid"
+
+
 def overlap_anon(args, drafts, deadline):
     threshold = args.reference_anon + sum(len(draft.bytes) for draft in drafts)
     last_anon = None
     try:
         while True:
             anon = read_anon(args.cgroup, remaining(deadline))
+            remaining(deadline)
             if anon is not None:
+                if anon >= threshold:
+                    return anon, None
                 last_anon = anon
-            if anon is not None and anon >= threshold and time.monotonic() < deadline:
-                return last_anon, None
             time.sleep(min(0.05, remaining(deadline)))
     except TimeoutError:
+        if last_anon is None:
+            return None, missing_barrier_anon(args.round)
         return last_anon, f"round {args.round}: the bodies did not overlap"
 
 
@@ -326,12 +345,18 @@ def run_round(args, sender, drafts):
     failure = barrier.failure or next(failures, None)
     return {
         "round": args.round, "reference_anon": args.reference_anon, "barrier_anon": anon,
+        "barrier_failure": barrier.failure,
         "mem_available_min_kib": min(samples), "answers": answers,
     }, failure
 
 
 ROUND_ONE_MIN_BYTES = 16 * 1024 * 1024 - 64 * 1024
 ROUND_ONE_MAX_BYTES = 16 * 1024 * 1024
+# The seed uses U1 and a one-digit ordinal. The URL holds the reference and key.
+# A header holds the CSRF token. The body can add 18 digits to the pinned one-digit row_version.
+# A nonnegative BIGINT has 1 to 19 decimal digits.
+ROUND_TWO_MIN_BYTES = 3_033_541
+ROUND_TWO_MAX_BYTES = ROUND_TWO_MIN_BYTES + (19 - 1)
 MEMORY_PHASES = ("seed", "precheck", "baseline-1", "round-1", "baseline-2", "round-2")
 CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
 
@@ -469,6 +494,8 @@ class ValueCheck:
                 lengths.append(size)
                 if number == 1 and not ROUND_ONE_MIN_BYTES <= size <= ROUND_ONE_MAX_BYTES:
                     self.failures.append(f"{label} {ref} body length is outside the 16 MiB window")
+                elif number == 2 and not ROUND_TWO_MIN_BYTES <= size <= ROUND_TWO_MAX_BYTES:
+                    self.failures.append(f"{label} {ref} body length is outside the pinned window")
         if rows != {ref: self.keys.get(ref) for ref in refs}:
             self.failures.append(f"{label} does not use the four draft keys from the state file")
         return batch, lengths
@@ -490,7 +517,7 @@ class ValueCheck:
             errors = [f"{phase} {field} is unavailable or invalid"
                       for field, value in values.items() if value is None]
         self.failures.extend(errors)
-        values["current"] = _memory.nonnegative_integer(raw.get("current"))
+        values["current"] = _memory.memory_counter(raw.get("current"))
         if values["current"] is None:
             self.failures.append(f"{phase} current is unavailable or invalid")
         container = raw.get("container_id")
@@ -502,12 +529,23 @@ class ValueCheck:
 
     def check_overlap(self, number, batch, lengths, baseline):
         reference = json_count(batch.get("reference_anon"))
-        barrier = json_count(batch.get("barrier_anon"))
+        raw_barrier = batch.get("barrier_anon")
+        barrier = json_count(raw_barrier)
+        margin = None
+        if reference is not None and barrier is not None and len(lengths) == 4:
+            margin = barrier - reference - sum(lengths)
         if reference is None or (baseline is not None and reference != baseline):
             self.failures.append(f"round {number} reference_anon must equal the baseline anon")
-        if barrier is None or (reference is not None and len(lengths) == 4
-                               and barrier - reference < sum(lengths)):
+        if barrier is None:
+            error = batch.get("barrier_failure")
+            valid_errors = (missed_barrier(number, ref) for ref in REFERENCES[:4])
+            if raw_barrier is None and error in valid_errors:
+                self.failures.append(error)
+            else:
+                self.failures.append(missing_barrier_anon(number))
+        elif margin is not None and margin < 0:
             self.failures.append(f"round {number}: the bodies did not overlap")
+        return {"reference_anon": reference, "barrier_anon": barrier, "overlap_margin": margin}
 
     def elapsed(self, now, path, label):
         try:
@@ -523,7 +561,7 @@ class ValueCheck:
         container = reading.get("container_id")
         if container and baseline.get("container_id") and container != baseline["container_id"]:
             self.failures.append(f"round {number} container ID differs from its baseline")
-        self.check_overlap(number, batch, lengths, baseline.get("anon"))
+        overlap = self.check_overlap(number, batch, lengths, baseline.get("anon"))
         available = json_count(batch.get("mem_available_min_kib"))
         if available is None:
             self.failures.append(f"round {number} MemAvailable is missing or invalid")
@@ -531,7 +569,7 @@ class ValueCheck:
         statistic = (peak - current) / 4 if peak is not None and current is not None else None
         return {"round": number, "container_id": container, "peak": peak,
                 "body_bytes": max(lengths, default=None), "run_statistic": statistic,
-                "mem_available_min_kib": available}
+                "mem_available_min_kib": available, **overlap}
 
     def has_round_files(self, number):
         names = (f"load-value-answers-{number}.json", f"load-memory-value-round-{number}.json",
@@ -539,10 +577,13 @@ class ValueCheck:
         return any((self.directory / name).is_file() for name in names)
 
     def check_round_readings(self, readings):
-        round_one = readings["round-1"][0]["container_id"]
-        round_two = readings["round-2"][0]["container_id"]
-        if round_one is not None and round_one == round_two:
-            self.failures.append("Both rounds use the same container ID")
+        for before, after in (("precheck", "baseline-1"), ("round-1", "baseline-2")):
+            retiring = readings[before][0]["container_id"]
+            baseline = readings[after][0]["container_id"]
+            if retiring is not None and retiring == baseline:
+                self.failures.append(
+                    f"value-{before} and value-{after} use the same container ID"
+                )
         peak = readings["round-2"][0]["peak"]
         if peak is not None and peak >= _memory.SOAK_MEMORY_CEILING:
             self.failures.append("round 2 reading reached the ceiling of 384 MiB")
@@ -562,7 +603,7 @@ class ValueCheck:
             precheck = self.check_precheck(summary)
             numbers = (1,) if self.has_round_files(1) else ()
         else:
-            precheck = self.read_versions("precheck", REFERENCES[-1:]).get(REFERENCES[-1])
+            precheck = self.check_precheck()
             self.check_round_readings(readings)
             numbers = (1, 2)
 
@@ -623,6 +664,9 @@ def round_summary(result, baseline, reading):
         f"{label} body length: {display(size)} bytes",
         (f"{label} run statistic: {display(result['run_statistic'])} bytes "
          f"(upper bound, 3 × body length: {display(triple)} bytes)"),
+        f"{label} reference_anon: {display(result['reference_anon'])} bytes",
+        f"{label} barrier_anon: {display(result['barrier_anon'])} bytes",
+        f"{label} overlap_margin: {display(result['overlap_margin'])} bytes",
         f"{label} smallest MemAvailable: {display(result['mem_available_min_kib'])} KiB",
     ])
     return lines

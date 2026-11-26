@@ -132,6 +132,7 @@ This design checks the facts at `origin/main` `66cb8e9`. That commit holds chang
 ### D5. Place in the job `load`
 
 - A new step `value-seed` runs after the step `memory-timings` and before the flood. It seeds the five drafts of D3 and logs in once.
+- The step `value-seed` has the condition `${{ !cancelled() && steps.seed.outcome == 'success' }}`, thus the value leg also runs after a failed earlier step when the seed step passed.
 - `value-seed` writes `load-value-state.json` with mode 0600 in `$CI_STATE`. The file holds the session cookie, the CSRF token, and the fields of each draft (section "Interfaces").
 - At its end, `value-seed` takes the reading `value-seed`. The flood replaces `app` later, so only this reading holds the peak of the seed.
 - The value leg does not log in again. The `session` table keeps the session over `recreate_app` (ADR-0014). The steps from `value-seed` to `value` take less than `session.idle_timeout` (30 min).
@@ -262,7 +263,7 @@ The decisions:
 - The fixture of `largest_form_tests.rs` takes the number of wide levels as an argument. The tests of change A keep 14 wide levels, their pins, and the behavior of `main`.
 - New pins replace the pins of D6. Task 2A.1 measures them. Task 2A.3 copies them into D6 and ADR-0222 (c).
 - A new `recipe-db` test writes the round 2 value into PostgreSQL with the statement of the adapter. It proves that `parameter_value_size` accepts the value.
-- The `recipe-db` test measures `pg_column_size` of the round 2 value: `26 964` bytes. It needs Docker (`reliability.md` §6).
+- PostgreSQL checks `parameter_value_size` before TOAST compression. The `recipe-db` test asserts `pg_column_size($1::jsonb)` of the round 2 value: `770 040` bytes. The limit leaves a margin of `278 536` bytes. On disk the value has `26 964` bytes. The test needs Docker (`reliability.md` §6).
 - The leg takes the reading `value-precheck` also after a failed pre-check, as `value_round` does after a failed round. This changes actions 2 and 3 of D5.
 - After a stop, the summary shows the OOM counts and the restart count of each value reading. A stop gives no artifact, so only the summary holds these values.
 - The owner chose option (a) of the diagnosis. Rejected: (b) 16 384 leaves with fewer array levels.

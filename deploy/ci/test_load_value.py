@@ -17,7 +17,9 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -82,18 +84,53 @@ class ValuePeer(http.server.BaseHTTPRequestHandler):
 
 
 class FixtureSocket(socket.socket):
+    def send(self, data):
+        return self.write(data, time.monotonic() + self.gettimeout())
+
     def sendall(self, data):
-        # Use write because the sandbox can block sendall on local sockets.
         deadline = time.monotonic() + self.gettimeout()
         data = memoryview(data)
         while data:
+            data = data[self.write(data, deadline):]
+
+    def write(self, data, deadline):
+        # Use os.write because the sandbox can block sends on local sockets.
+        while True:
             timeout = max(0, deadline - time.monotonic())
             if not select.select([], [self], [], timeout)[1] or timeout == 0:
                 raise TimeoutError
             try:
-                data = data[os.write(self.fileno(), data):]
+                return os.write(self.fileno(), data)
             except BlockingIOError:
                 continue
+
+
+class SlowTlsSocket(contextlib.AbstractContextManager):
+    def __init__(self):
+        self.now = 0
+        self.timeout = None
+        self.written = 0
+        self.attempt_sizes = []
+
+    def __exit__(self, *_exc):
+        pass
+
+    def settimeout(self, timeout):
+        self.timeout = timeout
+
+    def send(self, data):
+        self.attempt_sizes.append(len(data))
+        self.now += min(self.timeout, 0.75)
+        if self.timeout < 0.75:
+            raise TimeoutError
+        size = min(len(data), 256 * 1024)
+        self.written += size
+        return size
+
+    def sendall(self, data):
+        # Model the separate timeout for each write in TLS sendall.
+        while data:
+            data = data[self.send(data):]
 
 
 class ValueServer:
@@ -216,6 +253,34 @@ class ValueSenderTests(unittest.TestCase):
             self.assertNotIn("HX-Request", headers)
         self.context.assert_called_once_with(cafile=str(self.ca))
 
+    def test_slow_body_stops_at_the_send_deadline(self):
+        args = SimpleNamespace(url=urllib.parse.urlsplit("https://127.0.0.1"),
+                               cacert=self.state / "root.crt")
+        sender = self.module.ValueSender(args, {"cookie": COOKIE, "csrf_token": TOKEN})
+        barrier = self.module.RoundBarrier(1)
+        barrier.release.set()
+        for phase, gate, error in (
+            ("barrier", barrier, "round 1: request LOAD-V1 did not reach the barrier"),
+            ("single", None, "round 1: request LOAD-V1 failed during answer collection"),
+        ):
+            with self.subTest(phase=phase):
+                sock = SlowTlsSocket()
+                draft = self.module.DraftBody(1, self.drafts[0], b"x" * (2 * 1024 * 1024))
+                with (patch.object(self.module.time, "monotonic", lambda sock=sock: sock.now),
+                      patch.object(self.module, "REQUEST_TIMEOUT", 1),
+                      patch.object(sender, "connect", return_value=sock),
+                      patch.object(sender, "send_headers"),
+                      patch.object(sender, "receive") as receive):
+                    sender.send(draft, 0, gate)
+
+                self.assertEqual(draft.answer["error"], error)
+                self.assertEqual(sock.now, 1)
+                self.assertEqual(sock.written, 256 * 1024)
+                self.assertLessEqual(max(sock.attempt_sizes), 1024 * 1024)
+                self.assertIsNone(draft.answer["last_byte_s"])
+                receive.assert_not_called()
+        self.assertTrue(barrier.ready.empty())
+
     def test_round_fails_when_a_serial_peer_blocks_the_barrier(self):
         server = self.start_peer(serial=True)
         status, error = self.run_round()
@@ -223,6 +288,15 @@ class ValueSenderTests(unittest.TestCase):
         self.assertRegex(error, r"^round 1: request LOAD-V[1-4] did not reach the barrier\n$")
         self.samples.assert_not_called()
         self.assertEqual(server.requests, [])
+        report = self.read_report("load-value-answers-1.json")
+        self.assertIsNone(report["barrier_anon"])
+        self.assertEqual(report.get("barrier_failure"), error.strip())
+
+    def test_round_fails_when_no_anon_sample_exists(self):
+        self.start_peer()
+        self.stat.write_text("file 90000000\n", encoding="ascii")
+        self.assertEqual(self.run_round(), (1, "round 1 barrier_anon is missing or invalid\n"))
+        self.samples.assert_called()
 
     def test_round_fails_when_anon_does_not_rise_enough(self):
         server = self.start_peer()
@@ -406,6 +480,13 @@ class ValueCheckerTests(unittest.TestCase):
             self.assertIn(field, error)
         self.assertNotIn(TOKEN, error)
 
+    def test_final_check_requires_both_precheck_answers(self):
+        self.path("precheck-1").unlink()
+        self.write("precheck-2", self.read("precheck-2") | {"location": "/login"})
+
+        self.check_failures("pre-check round 1 request LOAD-V5 is missing or invalid",
+                            "pre-check round 2 request LOAD-V5 has an incorrect Location")
+
     def test_round_one_uses_precheck_version_for_load_v5(self):
         self.assertEqual(self.run_check("check-round"), "")
 
@@ -426,6 +507,9 @@ class ValueCheckerTests(unittest.TestCase):
 
     def test_round_one_at_ceiling_reports_both_rounds_and_passes(self):
         self.change_reading("round-1", peak=str(self.ceiling))
+        batch = self.read("answers-2")
+        batch["barrier_anon"] += 29
+        self.write("answers-2", batch)
         self.assertEqual(self.run_check(), "")
         report = json.loads((self.state / "load-value.json").read_text(encoding="utf-8"))
         self.assertTrue(report["passed"])
@@ -434,10 +518,12 @@ class ValueCheckerTests(unittest.TestCase):
         self.assertGreaterEqual(report["leg_elapsed_s"], 40)
         self.assertEqual(report["rounds"], [
             {"round": 1, "container_id": "c" * 64, "peak": self.ceiling, "body_bytes": BODY_BYTES,
-             "run_statistic": 95_663_295.75, "mem_available_min_kib": 10_000},
+             "run_statistic": 95_663_295.75, "mem_available_min_kib": 10_000,
+             "reference_anon": 4096, "barrier_anon": 66_978_152, "overlap_margin": 0},
             {"round": 2, "container_id": "d" * 64, "peak": self.ceiling - 1,
              "body_bytes": WRITE_BYTES, "run_statistic": 95_663_295.5,
-             "mem_available_min_kib": 10_000},
+             "mem_available_min_kib": 10_000, "reference_anon": 4096,
+             "barrier_anon": 12_138_289, "overlap_margin": 29},
         ])
         summary = self.summary.read_text(encoding="utf-8")
         self.assertTrue(summary.startswith("Earlier summary.\n"))
@@ -446,10 +532,47 @@ class ValueCheckerTests(unittest.TestCase):
             self.assertIn(value, summary)
         self.assertRegex(summary, rf"(?m)^.*95663295\.75.*{3 * BODY_BYTES}.*$")
         self.assertRegex(summary, rf"(?m)^.*95663295\.5.*{3 * WRITE_BYTES}.*$")
+        for number, barrier, margin in ((1, 66_978_152, 0), (2, 12_138_289, 29)):
+            self.assertIn(f"round {number} reference_anon: 4096 bytes\n", summary)
+            self.assertIn(f"round {number} barrier_anon: {barrier} bytes\n", summary)
+            self.assertIn(f"round {number} overlap_margin: {margin} bytes\n", summary)
+
+    def test_round_two_reports_a_negative_overlap_margin_for_unequal_bodies(self):
+        self.change_answer(2, body_bytes=WRITE_BYTES + 7)
+
+        self.assertEqual(self.run_check(expected=1), "round 2: the bodies did not overlap\n")
+        report = json.loads((self.state / "load-value.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["rounds"][1].get("overlap_margin"), -7)
+        summary = self.summary.read_text(encoding="utf-8")
+        self.assertIn("round 2 overlap_margin: -7 bytes\n", summary)
 
     def test_round_two_at_ceiling_fails(self):
         self.change_reading("round-2", peak=str(self.ceiling))
         self.check_failures("round 2 reading reached the ceiling of 384 MiB")
+
+    def test_round_two_rejects_four_short_bodies(self):
+        batch = self.read("answers-2")
+        for answer in batch["answers"]:
+            answer["body_bytes"] = 256
+        batch["barrier_anon"] = REFERENCE_ANON + 4 * 256
+        self.write("answers-2", batch)
+        error = self.run_check(expected=1)
+        self.assertEqual(error.splitlines(), [
+            f"round 2 {ref} body length is outside the pinned window" for ref in self.refs[:4]
+        ])
+
+    def test_round_two_accepts_only_lengths_within_the_pinned_window(self):
+        batch = self.read("answers-2")
+        sizes = (WRITE_BYTES - 1, WRITE_BYTES, WRITE_BYTES + 18, WRITE_BYTES + 19)
+        for answer, size in zip(batch["answers"], sizes):
+            answer["body_bytes"] = size
+        batch["barrier_anon"] = REFERENCE_ANON + sum(sizes)
+        self.write("answers-2", batch)
+        error = self.run_check(expected=1)
+        self.assertEqual(error.splitlines(), [
+            f"round 2 {ref} body length is outside the pinned window"
+            for ref in ("LOAD-V1", "LOAD-V4")
+        ])
 
     def test_round_one_reports_each_memory_bound(self):
         conditions = (("oom", "1"), ("oom_kill", "1"), ("max", "1"), ("OOMKilled", "true"),
@@ -466,6 +589,63 @@ class ValueCheckerTests(unittest.TestCase):
     def test_round_one_unavailable_peak_fails(self):
         self.change_reading("round-1", peak="unavailable")
         self.check_failures("value-round-1 peak")
+
+    def test_oversized_memory_counters_preserve_the_reports(self):
+        self.change_reading("round-1", peak="9" * 400)
+        self.change_reading("baseline-2", current=2**63)
+        self.change_answer(2, status=409)
+
+        failures = self.run_check(expected=1).splitlines()
+        artifact = self.state / "load-value.json"
+        self.assertTrue(artifact.is_file(), "\n".join(failures))
+        report = json.loads(artifact.read_text(encoding="utf-8"))
+        self.assertFalse(report["passed"])
+        self.assertEqual(report["failures"], failures)
+        summary = self.summary.read_text(encoding="utf-8").splitlines()
+        for prefix in ("value-round-1 peak", "value-baseline-2 current",
+                       "round 2 request LOAD-V1 returned status 409"):
+            self.assertTrue(any(line.startswith(prefix) for line in failures), failures)
+        for failure in failures:
+            self.assertIn(failure, summary)
+        self.assertIsNone(report["rounds"][0]["peak"])
+        self.assertEqual([row["run_statistic"] for row in report["rounds"]], [None, None])
+
+    def test_round_one_stop_reports_the_missed_barrier(self):
+        cause = "round 1: request LOAD-V1 did not reach the barrier"
+        batch = self.read("answers-1")
+        batch.update(barrier_anon=None, barrier_failure=cause)
+        for answer in batch["answers"]:
+            answer.update(status=None, code=None, field=None, last_byte_s=None, answer_s=None,
+                          error=cause)
+        self.write("answers-1", batch)
+        for name in ("answers-2", "versions-2", "memory-value-baseline-2", "memory-value-round-2"):
+            self.path(name).unlink()
+
+        self.check_failures("stopped before round 2")
+        report = json.loads((self.state / "load-value.json").read_text(encoding="utf-8"))
+        summary = self.summary.read_text(encoding="utf-8").splitlines()
+        result = report["rounds"][0]
+        expected = {"reference_anon": 4096, "barrier_anon": None, "overlap_margin": None}
+        self.assertEqual({key: result.get(key, "missing") for key in expected}, expected)
+        self.assertIn("round 1 barrier_anon: unavailable bytes", summary)
+        self.assertIn("round 1 overlap_margin: unavailable bytes", summary)
+        with self.subTest("sender cause"):
+            self.assertEqual(report["failures"].count(cause), 1, report["failures"])
+            self.assertEqual(summary.count(cause), 1)
+        with self.subTest("missing sample"):
+            shortfall = "round 1: the bodies did not overlap"
+            self.assertNotIn(shortfall, report["failures"])
+            self.assertNotIn(shortfall, summary)
+
+    def test_final_check_requires_a_sample_or_a_valid_missed_barrier(self):
+        batch = self.read("answers-2")
+        batch.update(barrier_anon=None, barrier_failure=f"invalid barrier failure {TOKEN}")
+        self.write("answers-2", batch)
+
+        self.assertEqual(self.run_check(expected=1).splitlines(), [
+            "round 2 barrier_anon is missing or invalid",
+        ])
+        self.assertNotIn(TOKEN, self.summary.read_text(encoding="utf-8"))
 
     def test_round_one_without_statuses_reports_the_stop(self):
         batch = self.read("answers-1")
@@ -485,7 +665,8 @@ class ValueCheckerTests(unittest.TestCase):
         self.assertEqual(report["rounds"], [
             {"round": 1, "container_id": "c" * 64, "peak": 536_870_912,
              "body_bytes": BODY_BYTES, "run_statistic": 129_217_727.75,
-             "mem_available_min_kib": 10_000},
+             "mem_available_min_kib": 10_000, "reference_anon": 4096,
+             "barrier_anon": 66_978_152, "overlap_margin": 0},
         ])
         summary = self.summary.read_text(encoding="utf-8")
         for line in ("value-seed memory.peak=", "value-precheck memory.peak=",
@@ -510,9 +691,11 @@ class ValueCheckerTests(unittest.TestCase):
                      "versions-1", "versions-2"):
             self.path(name).unlink()
 
-        cause = "pre-check round 1 request LOAD-V5 returned status 500"
+        cause = "pre-check round 1 request LOAD-V5 returned status 500. Expected 422."
+        self.assertEqual(self.run_check("check-precheck", expected=1).splitlines(), [cause])
         self.check_failures("stopped before round 2", cause)
         report = json.loads((self.state / "load-value.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["failures"].count(cause), 1)
         self.assertEqual(report["rounds"], [])
         summary = self.summary.read_text(encoding="utf-8")
         self.assertIn("value-seed memory.peak=", summary)
@@ -552,9 +735,19 @@ class ValueCheckerTests(unittest.TestCase):
         self.check_failures("round 2 request LOAD-V1", "Location", "LOAD-V1 row_version",
                             "LOAD-V5 row_version")
 
-    def test_reused_container_and_mismatched_baseline_fail(self):
+    def test_round_one_rejects_the_precheck_container(self):
+        self.change_reading("baseline-1", container_id="b" * 64)
+        self.change_reading("round-1", container_id="b" * 64)
+        self.check_failures("value-precheck and value-baseline-1 use the same container ID")
+
+    def test_round_two_rejects_the_round_one_container(self):
+        self.change_reading("baseline-2", container_id="c" * 64)
         self.change_reading("round-2", container_id="c" * 64)
-        self.check_failures("same container ID", "round 2 container ID differs from its baseline")
+        self.check_failures("value-round-1 and value-baseline-2 use the same container ID")
+
+    def test_round_two_container_must_match_its_baseline(self):
+        self.change_reading("round-2", container_id="e" * 64)
+        self.check_failures("round 2 container ID differs from its baseline")
 
     def test_rounds_require_the_same_four_distinct_draft_keys(self):
         for key in (self.keys[1], self.keys[4]):

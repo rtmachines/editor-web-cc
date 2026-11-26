@@ -394,6 +394,8 @@ const WIDE_LEVELS: usize = 12;
 const VALUE_JSON_BYTES: usize = 253_949;
 /// The SHA-256 of the compact JSON text of the round 2 value, as task 2A.1 pins it.
 const VALUE_JSON_SHA256: &str = "3f6aacb71efb84742bbb8fc0ccdc435e9869550da22c89f1b74fec934d3d3527";
+/// The JSONB size of the round 2 value before TOAST compression. This size meets the CHECK.
+const VALUE_JSONB_BYTES: i32 = 770_040;
 /// The size limit of `parameter_value_size` in bytes.
 const VALUE_SIZE_LIMIT: i32 = 1_048_576;
 /// The count of leaf 0. Leaf `i` adds `i` modulo 800, so the highest count is below `i64::MAX`.
@@ -435,6 +437,14 @@ async fn parameter_value_size_accepts_the_round_2_value() {
         .unwrap();
     assert_eq!(text.len(), VALUE_JSON_BYTES);
     assert_eq!(digest, VALUE_JSON_SHA256);
+    // `parameter_value_size` runs before TOAST compresses the value. It sees this size.
+    let jsonb_size: i32 = sqlx::query_scalar("SELECT pg_column_size($1::jsonb)")
+        .bind(&value)
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    assert!(jsonb_size <= VALUE_SIZE_LIMIT);
+    assert_eq!(jsonb_size, VALUE_JSONB_BYTES);
 
     let updated = sqlx::query(SET_VALUE)
         .bind(draft.version)
@@ -445,13 +455,13 @@ async fn parameter_value_size_accepts_the_round_2_value() {
         .unwrap();
 
     assert_eq!(updated.rows_affected(), 1);
-    let stored_size: i32 =
-        sqlx::query_scalar("SELECT pg_column_size(value) FROM parameter WHERE parameter_key = $1")
+    let stored: serde_json::Value =
+        sqlx::query_scalar("SELECT value FROM parameter WHERE parameter_key = $1")
             .bind(key)
             .fetch_one(&mut conn)
             .await
             .unwrap();
-    assert!(stored_size <= VALUE_SIZE_LIMIT);
+    assert_eq!(stored, value);
 }
 
 // ---- parameter_limit ----

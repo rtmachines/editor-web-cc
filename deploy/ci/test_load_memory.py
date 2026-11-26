@@ -179,6 +179,18 @@ class LoadMemoryTests(unittest.TestCase):
         self.assertFalse(artifact["passed"])
         self.assertIn("value-baseline-2", result.stderr)
 
+    def test_value_current_requires_a_kernel_counter(self):
+        phase = "value-baseline-1"
+        for current, expected in ((0, 0), (str(2**63 - 1), 2**63 - 1),
+                                  (2**63, None), (str(2**63), None)):
+            with self.subTest(current=current):
+                result, artifact, summary = self.run_value_cli({phase: {"current": current}})
+                self.assertEqual(result.returncode, int(expected is None), result.stderr)
+                self.assertEqual(artifact["value"][phase]["current"], expected)
+                if expected is None:
+                    self.assertIn(f"{phase} current:", result.stderr)
+                    self.assertIn(result.stderr.strip(), summary.splitlines())
+
     def test_round_one_reports_each_bound_that_fails_round_two(self):
         for field, value in (("oom", 1), ("oom_kill", 1), ("max", 1),
                              ("OOMKilled", True), ("RestartCount", 1), ("peak", 536870912)):

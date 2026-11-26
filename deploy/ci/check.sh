@@ -171,6 +171,7 @@ def test_ci_scripts_job():
 test_ci_scripts_job()
 
 
+# Start of the load job checks.
 def load_job_body():
     lines = Path('.github/workflows/ci.yml').read_text(encoding='utf-8').splitlines()
     header = '  load:'
@@ -223,7 +224,7 @@ def check_load_policy(body, steps):
     bounds = {'timings', 'flood', 'value', 'memory_check', 'value_check'}
     conditional = "        continue-on-error: ${{ matrix.image == 'cc-debian13' }}"
     for identifier, block in steps.items():
-        lines = [line for line in block.splitlines() if 'continue-on-error:' in line]
+        lines = re.findall(r'^        continue-on-error:.*', block, re.M)
         if lines != ([conditional] if identifier in bounds else []):
             raise SystemExit(f'load has the wrong continue-on-error for {identifier}')
     if len(re.findall(r'^ *continue-on-error:', body, re.M)) != len(bounds):
@@ -275,9 +276,10 @@ def check_load_commands(steps):
         require_load(steps[identifier], rf'^        run: bash deploy/ci/load\.sh {command}$',
                      'missing the command of step ' + identifier)
     require_load(steps['seed'], r'^        timeout-minutes: 30$', 'wrong seed timeout')
-    for identifier in ('memory_timings', 'flood', 'value', 'memory_check', 'value_check', 'values'):
+    for identifier in ('memory_timings', 'value_seed', 'flood', 'value', 'memory_check',
+                       'value_check', 'values'):
         require_load(steps[identifier],
-                     r"^        if: \$\{\{ !cancelled\(\) && steps.seed.outcome == 'success' \}\}$",
+                     r"^        if: \$\{\{ !cancelled\(\) && steps\.seed\.outcome == 'success' \}\}$",
                      f'{identifier} must run after a bound failure unless the job is cancelled')
     require_load(steps['diagnostics'], r'^        if: failure\(\)$', 'missing failure diagnostics')
     require_load(steps['cleanup'], r'^        if: always\(\)$', 'missing unconditional cleanup')
@@ -305,101 +307,6 @@ def check_load_artifacts(steps):
             raise SystemExit('load does not require all measured values')
 
 
-def reject_load_fixture(body, check, message):
-    try:
-        check(body, load_job_steps(body))
-    except SystemExit as error:
-        if message not in str(error):
-            raise SystemExit(f'load fixture failed for the wrong reason. {error}') from error
-    else:
-        raise SystemExit(f'load accepted a fixture without {message}')
-
-
-def test_load_value_policy(body, steps):
-    blocks = re.split(r'(?=^      - name: )', body, flags=re.MULTILINE)
-    without_value_leg = ''.join(
-        block for block in blocks
-        if not re.search(r'^        id: (value_seed|value|value_check)$', block, re.MULTILINE)
-    )
-    reject_load_fixture(without_value_leg, check_load_policy, 'the value leg')
-    value_check = steps['value_check']
-    without_allowance = re.sub(
-        r'^        continue-on-error: .*\n', '', value_check, flags=re.MULTILINE,
-    )
-    reject_load_fixture(
-        body.replace(value_check, without_allowance, 1), check_load_policy, 'value_check',
-    )
-    without_status = value_check.replace('!cancelled() && ', '', 1)
-    reject_load_fixture(
-        body.replace(value_check, without_status, 1),
-        lambda _, changed: check_load_commands(changed), 'value_check',
-    )
-    print('CI load value leg structure fixtures passed.')
-
-
-def load_values_fixture():
-    reading = dict.fromkeys(('peak', 'current', 'anon', 'file', 'limit', 'oom',
-                             'oom_kill', 'max', 'RestartCount'), 0)
-    reading.update(container_id='a' * 64, OOMKilled=False, peak=100, limit=536870912)
-    phases = {f'value-{phase}': reading.copy() for phase in (
-        'seed', 'precheck', 'baseline-1', 'round-1', 'baseline-2', 'round-2',
-    )}
-    phases['value-round-1'].update(peak=536870912, oom=1, max=1, RestartCount=1)
-    phases['value-baseline-2']['container_id'] = 'b' * 64
-    phases['value-round-2'].update(peak=402653184, container_id='b' * 64)
-    rounds = [
-        {'round': number, 'container_id': phase['container_id'], 'peak': phase['peak'],
-         'body_bytes': 16777216 if number == 1 else 13206677,
-         'run_statistic': phase['peak'] / 4, 'mem_available_min_kib': 1024}
-        for number, phase in enumerate((phases['value-round-1'], phases['value-round-2']), 1)
-    ]
-    return {
-        'seed': {'seed_seconds': 1},
-        'timings': {'seed_seconds': 1, 'timings_seconds': dict.fromkeys(
-            ('ApproveVersion', 'CreateVersion', 'GetVersion'), 0.1)},
-        'flood': {'logins_per_second': 1, 'p99_seconds': 0.1},
-        'memory': {'timings': reading, 'flood': reading, 'value': phases,
-                   'peak': 536870912, 'adr_0064_o_memory_condition': 'met'},
-        'value': {'passed': False, 'failures': ['round 2 reached the ceiling'], 'rounds': rounds,
-                  'job_elapsed_s': 20, 'leg_elapsed_s': 10},
-    }
-
-
-def test_load_values(step):
-    import json
-    import os
-    import subprocess
-    import sys
-    import tempfile
-    from textwrap import dedent
-
-    pattern = r"^          python3 -I -B - <<'PY'\n(.*?)^          PY$"
-    match = re.search(pattern, step, re.MULTILINE | re.DOTALL)
-    if not match:
-        raise SystemExit('load values has no isolated Python check')
-    with tempfile.TemporaryDirectory() as directory:
-        for expected in ('', 'value-round-1 peak', 'value-round-2 reading'):
-            reports = load_values_fixture()
-            phases = reports['memory']['value']
-            if expected == 'value-round-1 peak':
-                phases['value-round-1']['peak'] = None
-            elif expected:
-                del phases['value-round-2']
-            for name, report in reports.items():
-                path = Path(directory) / f'load-{name}.json'
-                path.write_text(json.dumps(report), encoding='utf-8')
-            result = subprocess.run(
-                [sys.executable, '-I', '-B', '-'], input=dedent(match.group(1)),
-                env=dict(os.environ, CI_STATE=directory), capture_output=True, text=True,
-                check=False,
-            )
-            if not expected and result.returncode:
-                raise SystemExit(f'load values rejected complete reports. {result.stderr.strip()}')
-            if expected and (result.returncode != 1 or expected not in result.stderr):
-                raise SystemExit(f'load values must reject and name the missing {expected}')
-    print('CI load values fixtures passed.')
-
-
 def test_load_job():
     body = load_job_body()
     steps = load_job_steps(body)
@@ -407,9 +314,8 @@ def test_load_job():
     check_load_builds(steps)
     check_load_commands(steps)
     check_load_artifacts(steps)
-    test_load_value_policy(body, steps)
-    test_load_values(steps['values'])
     print('CI load job check passed.')
+# End of the load job checks.
 
 
 test_load_job()

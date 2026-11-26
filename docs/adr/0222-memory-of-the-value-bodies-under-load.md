@@ -102,8 +102,9 @@ Rounds and the proof of the overlap:
   - A round 2 body is the write form. Each `LDT` text has the alias prefix `LDATE_AND_TIME#` of ADR-0205.
   - Both bodies use a type of 32 array levels: 12 levels `ARRAY[10..11] OF` and 20 levels `ARRAY[10..10] OF`. The value thus has 4 096 leaves (owner, 2026-11-24).
     - The reason: in the first dispatch run, PostgreSQL refused a round 2 value of 16 384 leaves with `parameter_value_size`. The answer was `409 E-DB-003`.
-    - A round 1 body has `16 743 514` bytes and the SHA-256 `354b1a3e4c5ff56400dc92f6f3ddf84fc104390e3334269d852b3ebae599ccc9`.
-    - A round 2 body has `3 033 541` bytes and the SHA-256 `631700fb82002bb379b37cc2cc9a7d6d9ef2dd628769e4ac3dd9a517f3076022`.
+    - The fixture of a round 1 body has `16 743 514` bytes and the SHA-256 `354b1a3e4c5ff56400dc92f6f3ddf84fc104390e3334269d852b3ebae599ccc9`.
+    - The fixture of a round 2 body has `3 033 541` bytes and the SHA-256 `631700fb82002bb379b37cc2cc9a7d6d9ef2dd628769e4ac3dd9a517f3076022`.
+    - The live bodies of the CI job have the same lengths but other SHA-256 values. Design D6 names the substitutions of the live bodies.
     - A `recipe-db` test writes the round 2 value into PostgreSQL. It proves that `parameter_value_size` accepts the value.
     - Item (a), Option F, and the risk of an OOM kill in round 1 name heap sums of ADR-0223. These sums describe the old round 1 body of 16 384 leaves.
     - This item thus amends ADR-0223 (v) and (w), because round 1 now uses the body of 4 096 leaves.
@@ -113,6 +114,8 @@ Rounds and the proof of the overlap:
     - At the barrier, the client reads `anon` of `memory.stat` of `app`. `anon` excludes the socket buffers.
     - The rise of `anon` over the baseline reading of the round must be at least 4 × the body length of that round.
     - Otherwise the value leg fails with `round <n>: the bodies did not overlap`.
+    - The bound is indirect evidence, because the `anon` rise can include memory that is not body memory. It does not prove that each body reached `app`.
+    - `load-value.json` and the job summary record `reference_anon`, `barrier_anon`, and `overlap_margin` of each round. `overlap_margin` is `barrier_anon − reference_anon −` the sum of the four body lengths.
     - A request that does not reach the barrier also fails the value leg.
   - Known limit: `app` runs the parse stages on `runtime.worker_threads` (2) Tokio workers and one CPU (`container.app_cpus`). The barrier holds four byte buffers at the same time. The parse stages can overlap only in part.
   - Known limit: the value leg cannot detect extra permits, because four requests also fit with five permits. `fifth_value_body_waits_and_gets_e_web_009` stays the test of the permit count.
@@ -139,6 +142,7 @@ Order of the steps:
   - The flood is no longer the last step. The value leg needs no login after the flood, because the step `value-seed` logs in before the flood.
     - The `session` table keeps the session over `recreate_app` (ADR-0014).
     - The steps from `value-seed` to `value` take less than `session.idle_timeout` (30 min).
+    - The step `value-seed` has the condition `${{ !cancelled() && steps.seed.outcome == 'success' }}`, thus the value leg also runs after a failed earlier step when the seed step passed.
   - The step `value` runs these actions in this order:
     1. It sends a round 1 body and then a round 2 body to the fifth draft, one request at a time.
     2. It requires `422` with the first field line `E-WEB-008` under `description_en`. Then it requires `303` with the exact `Location` and a larger `row_version`.

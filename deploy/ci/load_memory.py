@@ -3,7 +3,7 @@
 Pass the timings JSON path, the flood JSON path, and --output with an artifact path.
 Use --value PHASE=PATH for each of the six value phases.
 The value readings also require current and container_id.
-Byte values and counters accept nonnegative integers or decimal strings.
+Byte values and counters accept integers or decimal strings from 0 to 2^63 - 1.
 OOMKilled accepts a JSON boolean or the Docker strings true and false.
 GITHUB_STEP_SUMMARY selects the summary file to append.
 """
@@ -19,6 +19,7 @@ import sys
 # reliability.md section 7.11: container.app_memory and soak.memory_ceiling.
 APP_MEMORY = 512 * 1024 * 1024
 SOAK_MEMORY_CEILING = 384 * 1024 * 1024
+MAX_COUNTER = 2**63 - 1
 NUMERIC_FIELDS = ("peak", "limit", "anon", "file", "oom", "oom_kill", "max", "RestartCount")
 BOUND_COUNTERS = ("oom", "oom_kill", "max", "RestartCount")
 VALUE_PHASES = (
@@ -38,16 +39,21 @@ def nonnegative_integer(value):
     return None
 
 
+def memory_counter(value):
+    count = nonnegative_integer(value)
+    return count if count is not None and count <= MAX_COUNTER else None
+
+
 def check_reading(reading, phase, *, enforce_bounds=True):
     errors = []
     values = {}
     if not isinstance(reading, dict):
         reading = {}
     for field in NUMERIC_FIELDS:
-        value = nonnegative_integer(reading.get(field))
+        value = memory_counter(reading.get(field))
         values[field] = value
         if value is None:
-            errors.append(f"{phase} {field}: unavailable or not a nonnegative integer")
+            errors.append(f"{phase} {field}: unavailable or invalid (integer from 0 to 2^63 - 1)")
     killed = reading.get("OOMKilled")
     if type(killed) is bool:
         values["OOMKilled"] = killed
@@ -72,9 +78,9 @@ def check_value_reading(reading, phase):
     if not isinstance(reading, dict):
         return None, [f"{phase} reading is missing or invalid"]
     values, errors = check_reading(reading, phase, enforce_bounds=phase != "value-round-1")
-    current = nonnegative_integer(reading.get("current"))
+    current = memory_counter(reading.get("current"))
     if current is None:
-        errors.append(f"{phase} current: unavailable or not a nonnegative integer")
+        errors.append(f"{phase} current: unavailable or invalid (integer from 0 to 2^63 - 1)")
     container_id = reading.get("container_id")
     if not isinstance(container_id, str) or not re.fullmatch(r"[0-9a-f]{64}", container_id):
         errors.append(f"{phase} container_id: unavailable or invalid")

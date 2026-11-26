@@ -338,5 +338,5 @@ In each `Check:` command, `<run>` is the ID of the dispatched run. `<musl job>` 
   - Red test: none, because this task writes a document. Check: `python -I tools/ste-lint/ste-lint.py docs/architecture/reliability.md` gives 0 hard violations.
 - [x] 4.2 (CHANGELOG.md) [mechanical] Add one line for the value leg of the load job under "Unreleased".
   - Red test: none, because this task writes a document. Check: `python -I tools/ste-lint/ste-lint.py CHANGELOG.md` gives 0 hard violations.
-- [ ] 4.3 (openspec) [mechanical] Run the full gates.
+- [x] 4.3 (openspec) [mechanical] Run the full gates.
   - Red test: none, because this task runs the gates. Check: `openspec validate value-body-memory-load --strict` passes, and the ste-lint command of `CLAUDE.md` gives 0 hard violations.

@@ -78,6 +78,8 @@ elif name == "load_value":
             (app_cgroup() / "memory.events").write_text("oom 1\noom_kill 1\nmax 1\n")
             if os.environ.get("STUB_VALUE_FAILURE") == "round":
                 sys.exit(1)
+        elif os.environ.get("STUB_VALUE_FAILURE") == "round-2":
+            sys.exit(2)
     elif (os.environ.get("STUB_VALUE_FAILURE") == "single-2"
           and args[0] == "single" and option("--round") == "2"):
         sys.exit(2)
@@ -127,12 +129,17 @@ elif name == "docker":
                     f"'LOAD-V{number}'" in query for number in range(1, 6))
                 if os.environ.get("STUB_VALUE_FAILURE") == "versions":
                     sys.exit(3)
-                if os.environ.get("STUB_VALUE_FAILURE") == "missing-versions":
+                if (os.environ.get("STUB_VALUE_FAILURE") == "missing-versions"
+                        or (app_id()[0] == "c" and os.environ.get("STUB_ROUND_TWO_NO_VERSIONS"))):
                     sys.exit(0)
                 version = 4 if app_id()[0] == "c" else 3
-                print(json.dumps({"row_versions": {
+                versions = {
                     f"LOAD-V{number}": 4 if number == 5 else version
-                    for number in range(1, 6)}}))
+                    for number in range(1, 6)
+                }
+                if app_id()[0] == "c" and os.environ.get("STUB_VALUE_FAILURE") == "round-2":
+                    versions["LOAD-V4"] = 3
+                print(json.dumps({"row_versions": versions}))
         else:
             raise AssertionError("unexpected Compose command")
     elif args[0] == "inspect":
@@ -504,11 +511,32 @@ class LoadScriptTests(unittest.TestCase):
 
     def test_value_keeps_the_round_one_reading_when_the_client_fails(self):
         self.assert_round_one_stop("round")
-        self.assertEqual(self.value_events()[-1], ("reading", "b"))
+        self.assertEqual(self.value_events()[-3:], [
+            ("round", "1"), ("reading", "b"), ("versions", ""),
+        ])
 
     def test_value_keeps_the_round_one_reading_when_the_check_fails(self):
         self.assert_round_one_stop("check-round")
         self.assertEqual(self.value_events()[-1], ("check-round", "1"))
+
+    def test_value_reads_round_two_versions_when_the_client_fails(self):
+        result = self.run_load("value", STUB_VALUE_FAILURE="round-2")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertTrue((self.state / "load-memory-value-round-2.json").is_file())
+        versions_path = self.state / "load-value-versions-2.json"
+        self.assertTrue(versions_path.is_file(), "Round 2 must record the draft versions.")
+        self.assertEqual(json.loads(versions_path.read_text()), {"row_versions": {
+            "LOAD-V1": 4, "LOAD-V2": 4, "LOAD-V3": 4, "LOAD-V4": 3, "LOAD-V5": 4,
+        }})
+        self.assertEqual(self.value_events()[-3:], [
+            ("round", "2"), ("reading", "c"), ("versions", ""),
+        ])
+
+    def test_value_keeps_the_client_status_when_round_two_versions_are_missing(self):
+        result = self.run_load("value", STUB_VALUE_FAILURE="round-2",
+                               STUB_ROUND_TWO_NO_VERSIONS="1")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("expected five draft versions for value phase 2", result.stderr)
 
     def test_value_seed_writes_the_start_time_and_reads_memory(self):
         result = self.run_load("value-seed")

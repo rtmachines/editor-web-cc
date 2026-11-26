@@ -120,27 +120,27 @@ Each request of a round SHALL go to its own draft, and both rounds SHALL use the
 ## MODIFIED Requirements
 
 ### Requirement: Memory of the container app under load
-The load job SHALL read the memory of the container `app` after the timings, after the flood, and six times in the value leg. The container SHALL stay under its memory limit of 512 MiB, with no OOM kill and no restart. The `value-round-1` reading SHALL only report these bounds. A failed bound of another reading SHALL fail the job. A missing memory value of any reading SHALL fail the job (R30, R31, A26).
+The load job SHALL read the memory of the container `app` after the timings, after the flood, and six times in the value leg. The container SHALL stay under its memory limit of 512 MiB, with no OOM kill and no restart. The `value-round-1` reading SHALL only report these bounds. On the musl leg, a failed bound of another reading SHALL fail the job. The `cc-debian13` leg SHALL report the bounds of every reading, which are the timings, the flood, and the value readings. A missing memory value of any reading SHALL fail both legs (R30, R31, A26).
 
 #### Scenario: Memory limit exceeded
-- **GIVEN** a load run in which the kernel kills a process of `app` for its memory limit
+- **GIVEN** a load run of the musl leg in which the kernel kills a process of `app` for its memory limit
 - **AND** the reading of that kill is not the `value-round-1` reading
 - **WHEN** the job checks the memory of `app`
 - **THEN** the job fails and names the OOM kill
 
 #### Scenario: Restart of the container
-- **GIVEN** a load run in which the container `app` has a restart count of 1
+- **GIVEN** a load run of the musl leg in which the container `app` has a restart count of 1
 - **AND** the reading of that count is not the `value-round-1` reading
 - **WHEN** the job checks the memory of `app`
 - **THEN** the job fails and names the restart
 
 #### Scenario: Peak at the memory limit
-- **GIVEN** a memory reading other than the `value-round-1` reading with `memory.peak` equal to 512 MiB
+- **GIVEN** a memory reading of the musl leg other than the `value-round-1` reading with `memory.peak` equal to 512 MiB
 - **WHEN** the job checks the memory of `app`
 - **THEN** the job fails and names the limit of 512 MiB
 
 #### Scenario: Missing memory value
-- **GIVEN** a memory reading in which `memory.peak` is `unavailable`, also the `value-round-1` reading
+- **GIVEN** a memory reading of either leg in which `memory.peak` is `unavailable`, also the `value-round-1` reading
 - **WHEN** the job checks the memory of `app`
 - **THEN** the job fails and names the missing value
 
@@ -149,4 +149,10 @@ The load job SHALL read the memory of the container `app` after the timings, aft
 - **AND** that reading has an `oom_kill` count of 1 and a restart count of 1
 - **WHEN** the job checks the memory of `app`
 - **THEN** the check of the memory does not fail on that reading
+- **AND** the job reports the peak, the count `oom_kill`, and the restart count of that reading
+
+#### Scenario: Value reading at the memory limit on the cc-debian13 leg
+- **GIVEN** the `cc-debian13` leg and a `value-round-2` reading with an `oom_kill` count of 1
+- **WHEN** the job checks the memory of `app`
+- **THEN** the job does not fail on that reading
 - **AND** the job reports the peak, the count `oom_kill`, and the restart count of that reading

@@ -307,6 +307,7 @@ jobs:
         run: bash deploy/ci/load.sh memory-timings
       - name: Seed the drafts for the value leg
         id: value_seed
+        if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
         timeout-minutes: 10
         run: bash deploy/ci/load.sh value-seed
       - name: Recreate app and run the login flood
@@ -354,10 +355,9 @@ jobs:
 
 
           def require(report, field, valid, label):
-              value = report.get(field) if isinstance(report, dict) else None
-              if not valid(value):
+              if not isinstance(report, dict) or field not in report or not valid(report[field]):
                   raise MissingValue(f"{label} {field}")
-              return value
+              return report[field]
 
 
           def count(value):
@@ -368,6 +368,15 @@ jobs:
               return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
 
 
+          def require_memory_reading(reading, phase):
+              if not isinstance(reading, dict):
+                  raise MissingValue(f"{phase} reading")
+              for field in ("peak", "anon", "file", "limit", "oom", "oom_kill", "max",
+                            "RestartCount"):
+                  require(reading, field, count, phase)
+              require(reading, "OOMKilled", lambda value: type(value) is bool, phase)
+
+
           def require_value_readings(memory):
               readings = require(memory, "value", lambda value: isinstance(value, dict),
                                  "load-memory.json")
@@ -375,13 +384,9 @@ jobs:
                              "baseline-2", "round-2"):
                   phase = f"value-{suffix}"
                   reading = readings.get(phase)
-                  if not isinstance(reading, dict):
-                      raise MissingValue(f"{phase} reading")
-                  for field in ("peak", "current", "anon", "file", "limit", "oom", "oom_kill",
-                                "max", "RestartCount"):
-                      require(reading, field, count, phase)
+                  require_memory_reading(reading, phase)
+                  require(reading, "current", count, phase)
                   require(reading, "container_id", container_id, phase)
-                  require(reading, "OOMKilled", lambda value: type(value) is bool, phase)
 
 
           def require_value_results(report):
@@ -400,11 +405,15 @@ jobs:
                   numbers.add(number)
                   round_label = f"{label} round {number}"
                   require(result, "container_id", container_id, round_label)
-                  for field in ("peak", "body_bytes", "mem_available_min_kib"):
+                  for field in ("peak", "body_bytes", "mem_available_min_kib", "reference_anon"):
                       require(result, field, count, round_label)
+                  require(result, "barrier_anon", lambda value: value is None or count(value),
+                          round_label)
                   require(result, "run_statistic", lambda value: count(value)
                           or (type(value) is float and math.isfinite(value) and value >= 0),
                           round_label)
+                  require(result, "overlap_margin",
+                          lambda value: value is None or type(value) is int, round_label)
               if numbers != {1, 2}:
                   raise MissingValue("the results for both rounds")
 
@@ -417,10 +426,11 @@ jobs:
               flood, memory = reports["flood"], reports["memory"]
               require_value_readings(memory)
               require_value_results(reports["value"])
+              for phase in ("timings", "flood"):
+                  require_memory_reading(memory.get(phase), phase)
               values = [reports["seed"]["seed_seconds"], reports["timings"]["seed_seconds"],
                         *(timings[name] for name in ("ApproveVersion", "CreateVersion", "GetVersion")),
-                        flood["logins_per_second"], flood["p99_seconds"],
-                        memory["timings"]["peak"], memory["flood"]["peak"], memory["peak"]]
+                        flood["logins_per_second"], flood["p99_seconds"], memory["peak"]]
               if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
                      for value in values):
                   raise ValueError("invalid measurement")

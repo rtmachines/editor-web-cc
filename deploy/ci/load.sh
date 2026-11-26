@@ -200,18 +200,22 @@ PY
 }
 
 value_round() {
-  local number=$1 anon client_status=0 reading_status=0
+  local number=$1 anon client_status=0 reading_status=0 versions_status=0
   recreate_app
   read_memory "value-baseline-$number"
   anon=$(baseline_anon "$number")
   value_client round --round "$number" --cgroup "$APP_CGROUP" --reference-anon "$anon" \
     --url https://localhost:8443 --cacert "$CI_STATE/root.crt" || client_status=$?
-  # Keep the round reading after a client failure. Return the first failure.
+  # Read memory and draft versions even after a client failure. Return the first failure.
   (read_memory "value-round-$number") || reading_status=$?
+  (read_value_versions "$number") || versions_status=$?
   if (( client_status != 0 )); then
     return "$client_status"
   fi
-  return "$reading_status"
+  if (( reading_status != 0 )); then
+    return "$reading_status"
+  fi
+  return "$versions_status"
 }
 
 value_precheck() {
@@ -237,10 +241,8 @@ run_value() {
     return "$reading_status"
   fi
   value_round 1
-  read_value_versions 1
   value_client check-round --round 1
   value_round 2
-  read_value_versions 2
 }
 
 case ${1:-all} in
