@@ -53,19 +53,6 @@ const SESSION_FIELD: &str = "csrf_token";
 /// The form field of the pre-session token.
 const PRE_SESSION_FIELD: &str = "csrf_pre";
 
-/// Temporary mutation B of task 3.5: the number of extra copies of a round 2 value body.
-const MUTATION_B_COPIES: usize = 12;
-/// Temporary mutation B of task 3.5: a value body from this length on gets no copies.
-const MUTATION_B_WINDOW_START: usize = 16_711_680;
-
-/// Temporary mutation B of task 3.5: copy a round 2 value body `MUTATION_B_COPIES` times.
-fn mutation_b_copies(is_value_route: bool, body: &Bytes) -> Vec<Vec<u8>> {
-    if !is_value_route || body.len() >= MUTATION_B_WINDOW_START {
-        return Vec::new();
-    }
-    (0..MUTATION_B_COPIES).map(|_| body.to_vec()).collect()
-}
-
 /// Compare two byte strings in constant time. Strings of different length are not equal.
 fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
     left.ct_eq(right).into()
@@ -252,7 +239,6 @@ pub(crate) async fn csrf_layer(
     let limit = request_limit(state.settings(), &request);
     let (parts, body) = request.into_parts();
     let body = buffer_body(body, limit).await?;
-    let copies = mutation_b_copies(limit == state.settings().body_limit_value, &body);
     let is_form = parts
         .headers
         .get(CONTENT_TYPE)
@@ -274,9 +260,7 @@ pub(crate) async fn csrf_layer(
     if !accepted {
         return Err(reject(&state, rejection_event(&request)).await);
     }
-    let response = next.run(request).await;
-    drop(std::hint::black_box(copies));
-    Ok(response)
+    Ok(next.run(request).await)
 }
 
 #[cfg(test)]
