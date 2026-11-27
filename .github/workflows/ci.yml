@@ -414,6 +414,10 @@ jobs:
                           round_label)
                   require(result, "overlap_margin",
                           lambda value: value is None or type(value) is int, round_label)
+                  require(result, "barrier_anon_max", lambda value, number=number: value is None
+                          or (number == 2 and count(value)), round_label)
+                  require(result, "overlap_margin_max", lambda value, number=number: value is None
+                          or (number == 2 and type(value) is int), round_label)
               if numbers != {1, 2}:
                   raise MissingValue("the results for both rounds")
 

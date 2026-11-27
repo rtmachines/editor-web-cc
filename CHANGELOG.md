@@ -46,6 +46,11 @@ This file records the notable changes of the recipe editor. The format follows [
 - `pitr-volume` refuses a recovery that ends before the end of the WAL archive (V-02, ADR-0217). It writes the ERROR line "the recovery ended before the end of the WAL archive". A torn last record with only zero bytes after it passes with one WARN line.
 - After a record length of 0, the check also requires only zero bytes to the end of the newest file. The check refuses a newest file that is shorter than the segment size. A torn last record that crosses into an existing next segment is a known limit. The operator runs the recovery with `--target-time` before the newest commit (V-02, ADR-0221).
 - The body limit of the four value routes is 16 MiB (`http.body_limit.value`). A leaf path has at most 128 bytes (`budget.leaf_path_bytes`, `E-PLT-018`) (V-04, ADR-0211). At most 4 requests wait for, read, or hold a value body at once (`http.value_body_permits`). A fifth request waits at most `http.body_read_timeout`, then gets `503 E-WEB-009`.
+- The form reader refuses a `min`, `max`, or `max_length` text of a limit row above 256 decoded bytes with one `422 E-WEB-008` line (ADR-0225).
+  - Each numeric text above 256 bytes. Examples are `1.` with 300 zeros after it and `0e` with 300 digits after it.
+  - Each text that has spaces so that the text has more than 256 bytes, also a text with no other character.
+  - Each text with bytes that are not UTF-8, when the decoded text has more than 256 bytes. The decoder replaces each invalid sequence with U+FFFD, which has 3 bytes.
+  - Each `max_length` text of 257 digits or more in the answers of `fields=1` and `limit_mode`. Before this change, these answers showed such a text again, because only a save checks the 5 digits of `max_length`.
 
 ### Fixed
 

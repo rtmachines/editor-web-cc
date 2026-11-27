@@ -19,6 +19,7 @@ use super::request_type::request_type_expr;
 use crate::error::{FieldError, FieldReason, WebError};
 use crate::hex::hex_value;
 use crate::pages::path_values::flag;
+use crate::settings::LIMIT_TEXT_MAX;
 
 /// The key of the session token. The CSRF layer checked it, so the reader drops its value.
 const TOKEN_KEY: &str = "csrf_token";
@@ -220,7 +221,8 @@ pub(crate) fn read_body(body: &[u8], set: FieldSet) -> Result<SentFields, WebErr
 /// The reader counts each pair before it decodes the pair. It stops at the first bad key and
 /// answers one line `E-WEB-008`. A pair above [`max_pairs`] gives the reason `Form`. An unknown
 /// key and a plain field twice give `Form`. A bad value key or member key gives `ValueKey`, and a
-/// bad limit key gives `LimitRow`.
+/// bad limit key gives `LimitRow`. A bound text of a limit row above `LIMIT_TEXT_MAX` decoded bytes
+/// gives `LimitText` (ADR-0225).
 ///
 /// # Errors
 ///
@@ -356,6 +358,8 @@ impl Parts {
     }
 
     /// Put the text of one limit field `limits[<i>].<field>` into its row.
+    ///
+    /// A `min`, `max`, or `max_length` text above `LIMIT_TEXT_MAX` bytes gives `LimitText`.
     fn place_limit(&mut self, rest: &str, value: &str) -> Result<(), WebError> {
         let malformed = || bad("form", FieldReason::LimitRow);
         let (index, field) = rest.split_once("].").ok_or_else(malformed)?;
@@ -368,6 +372,11 @@ impl Parts {
             "max_length" => &mut parts.max_length,
             _other => return Err(malformed()),
         };
+        // The cap counts the decoded bytes before the trim (ADR-0225 (a)). `leaf_path` has its own
+        // bound (ADR-0211).
+        if field != "leaf_path" && value.len() > LIMIT_TEXT_MAX {
+            return Err(bad("form", FieldReason::LimitText));
+        }
         if slot.is_some() {
             return Err(malformed());
         }

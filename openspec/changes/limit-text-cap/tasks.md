@@ -23,7 +23,7 @@ The tasks use the answers of the Decided Questions of `design.md` (owner, 2026-1
 
 ## 1. ADR and the cap value
 
-- [ ] 1.1 (docs/adr) Write `docs/adr/0225-limit-text-cap.md` in the shape of ADR-0222, with the decisions C1, F3, D1, and R1 of `design.md`.
+- [x] 1.1 (docs/adr) Write `docs/adr/0225-limit-text-cap.md` in the shape of ADR-0222, with the decisions C1, F3, D1, and R1 of `design.md`.
   - First check that 0225 is still the next free number of `docs/adr/README.md`. If it is not free, stop and tell the owner. Do not take another number.
   - Name each amended item of `design.md`, section "Decisions", and give the new text of each item.
   - ADR-0138 (a) gets the reason text of the line. ADR-0138 (b) gets the over-long bound text as a fault of a changed body.
@@ -45,7 +45,7 @@ The tasks use the answers of the Decided Questions of `design.md` (owner, 2026-1
   - Red test: none, because the task writes no code.
   - Check: `python -I tools/ste-lint/ste-lint.py docs/adr/0225-limit-text-cap.md docs/adr/README.md docs/adr/0138-*.md docs/adr/0211-*.md docs/adr/0222-*.md docs/adr/0223-*.md` gives 0 hard violations.
   - Check: `grep -c 'ADR-0225' docs/adr/0138-*.md docs/adr/0211-*.md docs/adr/0222-*.md docs/adr/0223-*.md` gives at least 1 for each file.
-- [ ] 1.2 (docs/architecture, recipe-server) Add the row `form.limit_text_max` to `reliability.md` §7.11, with the value C of ADR-0225 and the unit `bytes`.
+- [x] 1.2 (docs/architecture, recipe-server) Add the row `form.limit_text_max` to `reliability.md` §7.11, with the value C of ADR-0225 and the unit `bytes`.
   - Red test: add the row first. The test `deploy_values` then fails, because `EXPLAINED` of `crates/recipe-server/tests/deploy_values/units.rs` has no word `bytes` for the key.
   - Add the pair `("form.limit_text_max", "bytes")` to `EXPLAINED`.
   - Do not add the code constant. Task 2.2 adds it with its first use.
@@ -53,7 +53,7 @@ The tasks use the answers of the Decided Questions of `design.md` (owner, 2026-1
 
 ## 2. C1: the cap in the reader and in the grid
 
-- [ ] 2.1 (recipe-web) Add the reason `LimitText` in both bundles. Its text names the cap, for example "a limit field has more than 256 bytes. Make the text shorter".
+- [x] 2.1 (recipe-web) Add the reason `LimitText` in both bundles. Its text names the cap, for example "a limit field has more than 256 bytes. Make the text shorter".
   - Red test: insert `(FieldReason::LimitText, "reason-limit-text")` into `RECIPE_REASON_KEYS` of `crates/recipe-web/src/error/reason_tests.rs` directly after the pair of `LimitRow`. Change the array length from 14 to 15. The test fails, because the variant does not exist.
   - Do not append the pair at the end. The order test then fails, because `LimitRow` is at index 30 of 49.
   - Rename three tests that hold the old numbers. `reason_all_holds_the_14_recipe_reasons_at_20_to_33_in_the_order_of_design_d6` becomes the 15 reasons at 20 to 34.
@@ -63,7 +63,7 @@ The tasks use the answers of the Decided Questions of `design.md` (owner, 2026-1
   - Update the ranges of `reason_tests.rs`. The recipe reasons change from 20..34 to 20..35 and from 14 to 15 (line 70).
   - The filter reasons change from 34..41 to 35..42 (line 91). The tail changes from 41.. to 42.. (line 157).
   - Check: `cargo test -p recipe-web --all-features --locked reason` passes.
-- [ ] 2.2 (recipe-web) Refuse a bound text above the cap in `place_limit` (`fields.rs:359`). Count the decoded UTF-8 bytes before the trim.
+- [x] 2.2 (recipe-web) Refuse a bound text above the cap in `place_limit` (`fields.rs:359`). Count the decoded UTF-8 bytes before the trim.
   - Add `pub(crate) const LIMIT_TEXT_MAX: usize` to `crates/recipe-web/src/settings.rs`, with the value C of ADR-0225. It is no field of `WebSettings`. `place_limit` is its first use.
   - Red test: `limit_text_max_equals_the_table` in `crates/recipe-web/src/settings/tests.rs` reads the row `form.limit_text_max` of §7.11 and compares it with the constant. It fails, because the constant does not exist.
   - Red test: `limit_text_reason_names_the_cap` in `crates/recipe-web/src/error/reason_tests.rs`. The English text and the `pl` text of `LimitText` each hold the number `LIMIT_TEXT_MAX`.
@@ -83,12 +83,12 @@ The tasks use the answers of the Decided Questions of `design.md` (owner, 2026-1
   - Compatibility test, which passes before and after the task: a `/definition` save with a `min` of `1.` and zeros, C bytes long, stores the minimum 1.
   - Check: `cargo test -p recipe-web --all-features --locked limit_text` passes.
   - Check: `cargo test -p recipe-web --all-features --locked xss` and `cargo test -p recipe-web --all-features --locked value_leg` pass, because these tests send limit fields.
-- [ ] 2.3 (docs/architecture) [mechanical] Copy the cap of ADR-0225 into `api.md` §2.6 and `CHANGELOG.md`.
+- [x] 2.3 (docs/architecture) [mechanical] Copy the cap of ADR-0225 into `api.md` §2.6 and `CHANGELOG.md`.
   - `api.md` §2.6, line 229: replace the sentence "The HTML of the editor never sends such a body" with the exact text of ADR-0225. Add the limit bound text above `form.limit_text_max` bytes to the item.
   - `CHANGELOG.md`, section "Changed": the cap, and each kind of input of ADR-0225 that the server accepted before and now refuses.
   - Red test: none, because the task writes no code.
   - Check: `python -I tools/ste-lint/ste-lint.py docs/architecture/api.md CHANGELOG.md` gives 0 hard violations.
-- [ ] 2.4 (recipe-web) Measure the largest answer at the cap with two ignored `dhat` pins.
+- [x] 2.4 (recipe-web) Measure the largest answer at the cap with two ignored `dhat` pins.
   - Add a new file `crates/recipe-web/src/pages/parameters/route_tests/largest_cap_tests.rs`, in the style of `largest_switch_tests.rs` and `measure_kit.rs`.
   - The type is `ARRAY[1..16384] OF INT`. A `[*]` row holds a `min`, a `max`, and a `max_length` of C bytes of `"` each. `moved_to` clones all three texts after the switch (`grid/limits.rs:121-128`).
   - Pin `largest_cap_all_htmx_pl`: the answer to `fields=1` in `[*]` mode. Pin `largest_cap_switch_htmx_pl`: the answer after the switch of `limit_mode` to the element rows.
@@ -100,7 +100,7 @@ The tasks use the answers of the Decided Questions of `design.md` (owner, 2026-1
   - Tell the owner when the request peak of a pin is above the largest request peak of the table of ADR-0223.
   - Check: `python -I tools/ste-lint/ste-lint.py docs/adr/0225-limit-text-cap.md` gives 0 hard violations.
 
-- [ ] 2.5 (recipe-web) Test the value C against the longest time literal and against the stored bounds.
+- [x] 2.5 (recipe-web) Test the value C against the longest time literal and against the stored bounds.
   - Test `limit_text_max_follows_the_longest_time_literal` in `crates/recipe-web/src/settings/tests.rs`. For each time type and each platform of the type, it builds the longest literal of the rule of ADR-0225.
     - A duration literal has the long prefix and a sign where the type takes one. Each part of the type has 19 zeros.
     - An instant literal has the long prefix and the longest fraction of its type (`instant.rs:114-120`).
@@ -117,7 +117,7 @@ The tasks use the answers of the Decided Questions of `design.md` (owner, 2026-1
 
 ## 3. F3 and D1: the value leg and the memory frame
 
-- [ ] 3.1 (deploy/ci) [codex] Add the record window to the overlap poll of round 2 in `deploy/ci/load_value.py`.
+- [x] 3.1 (deploy/ci) [codex] Add the record window to the overlap poll of round 2 in `deploy/ci/load_value.py`.
   - Red tests in `deploy/ci/test_load_value.py`, with fake reads and a fake clock:
     - Round 2 reads the threshold, then the threshold + 4 096, then the threshold. The report holds `barrier_anon` at the threshold and `barrier_anon_max` at the threshold + 4 096.
     - With the barrier deadline 8 s away, the window ends 1 s after the first crossing. The barrier releases at that time. A read after the window end does not count in `barrier_anon_max`.
@@ -134,7 +134,7 @@ The tasks use the answers of the Decided Questions of `design.md` (owner, 2026-1
   - The sender batch gets `barrier_anon_max` only. Task 3.2 computes `overlap_margin_max` in the checker.
   - Each read in the window gets the timeout of the earlier end: the window end or the barrier deadline.
   - Check: `python3 -I -B deploy/ci/test_load_value.py` passes.
-- [ ] 3.2 (deploy/ci) [codex] Add `barrier_anon_max` and `overlap_margin_max` to the checker, `load-value.json`, and the job summary.
+- [x] 3.2 (deploy/ci) [codex] Add `barrier_anon_max` and `overlap_margin_max` to the checker, `load-value.json`, and the job summary.
   - Red tests in `deploy/ci/test_load_value.py`:
     - With four unequal body lengths, the summary of round 2 shows `barrier_anon_max` and `overlap_margin_max`. `load-value.json` holds the exact margin. Round 1 shows `unavailable`.
     - A round 2 batch `load-value-answers-2.json` has a `barrier_anon` with an `overlap_margin` of 0 or more and no `barrier_anon_max`.
@@ -144,13 +144,13 @@ The tasks use the answers of the Decided Questions of `design.md` (owner, 2026-1
   - Pin test, which passes before and after the task: a round 2 batch with no crossing gives one failure, "the bodies did not overlap".
   - Update the synthetic batch of `deploy/ci/test_load_replay.py`, so the archived runs stay green.
   - Check: `python3 -I -B deploy/ci/test_load_value.py` and `python3 -I -B deploy/ci/test_load_replay.py` pass.
-- [ ] 3.3 (.github/workflows/ci.yml) [codex] Check the shape of the new fields in the step "Require the values from each leg" (`ci.yml:408-416`).
+- [x] 3.3 (.github/workflows/ci.yml) [codex] Check the shape of the new fields in the step "Require the values from each leg" (`ci.yml:408-416`).
   - The step requires both keys in each round. Round 1 has `null`. Round 2 has `null` or a count for `barrier_anon_max`, and `null` or an integer for `overlap_margin_max`.
   - Red tests in `deploy/ci/test_load_workflow.py`:
     - A missing key fails the step. A count in round 1 fails the step.
   - Pin test: a round 2 with `null` for both fields passes the step, because the checker of task 3.2 owns the rule of the crossing.
   - Check: `python3 -I -B deploy/ci/test_load_workflow.py` and `bash deploy/ci/check.sh` pass.
-- [ ] 3.4 (docs/architecture) State the memory frame D1 in `reliability.md` §7.8.
+- [x] 3.4 (docs/architecture) State the memory frame D1 in `reliability.md` §7.8.
   - Keep the table of run 45748785867 and its text with the body length, the run statistic, and 3 × the body length (ADR-0222 (f)).
   - Add the peak table of the three runs of `design.md`, section "D1: the measured runs".
   - State the frame: the `memory.peak` reading of each round against `soak.memory_ceiling`. The `dhat` pins of ADR-0223 bound one answer each, and no sum adds them.
@@ -164,7 +164,7 @@ The tasks use the answers of the Decided Questions of `design.md` (owner, 2026-1
 
 ## 4. Evidence
 
-- [ ] 4.1 (deploy/ci) [mechanical] Dispatch the job `load` on the pushed branch and record the result.
+- [x] 4.1 (deploy/ci) [mechanical] Dispatch the job `load` on the pushed branch and record the result.
   - Red test: none, because the task writes no code. The jobs themselves are the test.
   - Record `passed`, `failures`, the peak of each round, `barrier_anon_max`, and `overlap_margin_max` of round 2 of both legs in the PR description.
   - The step `value-check` only reports on `cc-debian13` (`ci.yml:335`), so a green job does not show a pass. Record the verdict of each artifact.

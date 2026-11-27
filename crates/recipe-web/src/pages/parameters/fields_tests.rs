@@ -11,6 +11,7 @@ use recipe_domain::recipe::{MemberValue, ParameterKey};
 use super::fields::{FieldSet, SentFields, form_pairs, max_pairs, read, read_body, read_pairs};
 use super::tree_kit::{line_tree, primitive_tree};
 use crate::error::{FieldReason, WebError};
+use crate::settings::LIMIT_TEXT_MAX;
 
 /// The key of a parameter in the rebind form.
 const KEY: &str = "7357a000-0000-0000-0000-000000000001";
@@ -617,4 +618,120 @@ async fn fields_form_page_heading_and_title_name_the_tag_the_recipe_and_the_vers
         assert!(title.starts_with(heading), "{}", reply.body);
         assert!(!reply.body.contains("parameter-title"), "{}", reply.body);
     }
+}
+
+// --- ADR-0225 (a), (b): a bound text above the cap is one line `LimitText` ------------------------
+
+/// The three bound fields of a limit row.
+const BOUND_FIELDS: [&str; 3] = ["min", "max", "max_length"];
+
+/// Read one limit row `[*]` whose field `field` holds `text`, with the set of the parameter form.
+fn read_bound(field: &str, text: &str) -> Result<SentFields, WebError> {
+    let name = format!("limits[0].{field}");
+    read_form(&[("limits[0].leaf_path", "[*]"), (name.as_str(), text)])
+}
+
+/// Return `text` followed by spaces so that the result has `bytes` bytes.
+fn padded(text: &str, bytes: usize) -> String {
+    let spaces = bytes.checked_sub(text.len()).unwrap();
+    format!("{text}{}", " ".repeat(spaces))
+}
+
+#[test]
+fn fields_limit_text_above_the_cap_gives_the_reason_limit_text_for_each_bound_field() {
+    for field in BOUND_FIELDS {
+        let text = "1".repeat(LIMIT_TEXT_MAX + 1);
+        assert_bad(read_bound(field, &text), "form", FieldReason::LimitText);
+    }
+}
+
+#[test]
+fn fields_limit_text_of_exactly_the_cap_passes_the_reader() {
+    for field in BOUND_FIELDS {
+        let text = "1".repeat(LIMIT_TEXT_MAX);
+        let sent = read_bound(field, &text).unwrap();
+        assert_eq!(sent.limits().len(), 1, "{field}");
+    }
+}
+
+#[test]
+fn fields_limit_text_counts_the_bytes_before_the_trim() {
+    for (field, valid) in [("min", "T#1s"), ("max", "T#1s"), ("max_length", "5")] {
+        let text = padded(valid, LIMIT_TEXT_MAX + 1);
+        assert_eq!(text.trim(), valid);
+        assert_bad(read_bound(field, &text), "form", FieldReason::LimitText);
+        let at_cap = padded(valid, LIMIT_TEXT_MAX);
+        assert!(read_bound(field, &at_cap).is_ok(), "{field} at the cap");
+    }
+}
+
+#[test]
+fn fields_limit_text_counts_utf8_bytes_and_not_characters() {
+    let text = "\u{e9}".repeat(LIMIT_TEXT_MAX / 2 + 1);
+    assert!(text.len() > LIMIT_TEXT_MAX);
+    assert!(text.chars().count() < LIMIT_TEXT_MAX);
+    assert_bad(read_bound("min", &text), "form", FieldReason::LimitText);
+    let at_cap = "\u{e9}".repeat(LIMIT_TEXT_MAX / 2);
+    assert_eq!(at_cap.len(), LIMIT_TEXT_MAX);
+    assert!(read_bound("min", &at_cap).is_ok());
+}
+
+/// Return a body with the limit row `[*]` whose `min` is `encoded` as it travels, percent-encoded.
+fn body_with_min(encoded: &str) -> String {
+    format!("limits[0].leaf_path=%5B*%5D&limits[0].min={encoded}")
+}
+
+#[test]
+fn fields_limit_text_counts_the_bytes_after_the_decode_of_bad_utf8() {
+    // Each byte `%FF` decodes to U+FFFD, which has 3 bytes.
+    let over = "%FF".repeat(LIMIT_TEXT_MAX / 3 + 1);
+    let error = read_body(body_with_min(&over).as_bytes(), FieldSet::Parameter);
+    assert_bad(error, "form", FieldReason::LimitText);
+    let within = "%FF".repeat(LIMIT_TEXT_MAX / 3);
+    assert!(read_body(body_with_min(&within).as_bytes(), FieldSet::Parameter).is_ok());
+}
+
+/// Return a body with the limit row `[*]` whose `min` holds `count` raw bytes `0xFF`, not encoded.
+fn body_with_raw_min(count: usize) -> Vec<u8> {
+    let mut body = b"limits[0].leaf_path=%5B*%5D&limits[0].min=".to_vec();
+    body.extend(std::iter::repeat_n(0xFF_u8, count));
+    body
+}
+
+#[test]
+fn fields_limit_text_counts_the_decoded_bytes_and_not_the_raw_bytes_of_a_raw_ff_body() {
+    // Each raw byte `0xFF` is 1 raw byte and decodes to U+FFFD, which has 3 bytes.
+    // The raw count stays below the cap while the decoded count passes it.
+    let over = LIMIT_TEXT_MAX / 3 + 1;
+    assert!(over < LIMIT_TEXT_MAX);
+    let error = read_body(&body_with_raw_min(over), FieldSet::Parameter);
+    assert_bad(error, "form", FieldReason::LimitText);
+    let within = LIMIT_TEXT_MAX / 3;
+    assert!(read_body(&body_with_raw_min(within), FieldSet::Parameter).is_ok());
+}
+
+#[test]
+fn fields_limit_text_pin_a_body_of_the_cap_in_digits_passes() {
+    // `%31` is the digit 1. The text decodes to LIMIT_TEXT_MAX bytes, so the reader accepts it.
+    let body = body_with_min(&"%31".repeat(LIMIT_TEXT_MAX));
+    let sent = read_body(body.as_bytes(), FieldSet::Parameter).unwrap();
+    assert_eq!(sent.limits().len(), 1);
+    assert_eq!(
+        sent.limits().first().map(|row| row.min.len()),
+        Some(LIMIT_TEXT_MAX)
+    );
+}
+
+#[test]
+fn fields_limit_text_applies_to_the_limits_form_too() {
+    let text = "1".repeat(LIMIT_TEXT_MAX + 1);
+    let pairs = [
+        ("limits[0].leaf_path", "[*]"),
+        ("limits[0].max", text.as_str()),
+    ];
+    assert_bad(
+        read_set(&pairs, FieldSet::Limits),
+        "form",
+        FieldReason::LimitText,
+    );
 }

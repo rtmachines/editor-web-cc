@@ -3,13 +3,23 @@
 //! A forged form can send any leaf path. The set keeps only the rows that the type tree holds, and
 //! a switch copies at most one row per leaf of the tree.
 
-use recipe_domain::plant::{LeafPath, Primitive, TypeTree};
+use std::collections::BTreeSet;
+
+use recipe_domain::plant::{
+    LeafClass, LeafPath, MachineId, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord,
+    Primitive, RecordShape, RuleSet, StringEncoding, TimeType, TypeTree,
+};
+use recipe_domain::recipe::StoredLimit;
+use uuid::Uuid;
 
 use super::limits::{LimitSet, LimitTexts};
 use super::{GridRow, GridSource, GridView, ValueTexts};
 use crate::i18n::{Bundles, Lang};
 use crate::pages::Texts;
-use crate::pages::parameters::tree_kit::{Kit, array_tree, zones_tree};
+use crate::pages::parameters::tree_kit::{
+    Kit, array_tree, primitive_tree, string_tree, zones_tree,
+};
+use crate::settings::LIMIT_TEXT_MAX;
 
 /// Build one limit row of texts.
 fn limit(path: &str, min: &str, max: &str) -> LimitTexts {
@@ -160,4 +170,202 @@ fn grid_limits_empty_element_rows_keep_a_limit_per_element() {
     let view = grid(&zones_tree(), rows, None);
     assert_eq!(currents(&view), ["[*]: a limit per element"]);
     assert!(has_limit_inputs(&view, "[2].setpoint"));
+}
+
+/// Both ends of each integer type, as the two texts that the page shows (`data-model.md` section 7).
+const INTEGER_ENDS: [(Primitive, &str, &str); 12] = [
+    (Primitive::Sint, "-128", "127"),
+    (Primitive::Usint, "0", "255"),
+    (Primitive::Byte, "0", "255"),
+    (Primitive::Int, "-32768", "32767"),
+    (Primitive::Uint, "0", "65535"),
+    (Primitive::Word, "0", "65535"),
+    (Primitive::Dint, "-2147483648", "2147483647"),
+    (Primitive::Udint, "0", "4294967295"),
+    (Primitive::Dword, "0", "4294967295"),
+    (
+        Primitive::Lint,
+        "-9223372036854775808",
+        "9223372036854775807",
+    ),
+    (Primitive::Ulint, "0", "18446744073709551615"),
+    (Primitive::Lword, "0", "18446744073709551615"),
+];
+
+/// A `REAL` or `LREAL` bound as the page stores it: the digit limits of ADR-0117 (a) with a scale
+/// of 28, a bound of 28 significant digits for each type, and the ends of `Decimal`. Each text
+/// has at most 28 fractional digits, so `Decimal` keeps it exactly.
+const REAL_BOUNDS: [(Primitive, &str, &str); 5] = [
+    (
+        Primitive::Real,
+        "-0.0000000000000000000001234567",
+        "0.0000000000000000000007654321",
+    ),
+    (
+        Primitive::Lreal,
+        "-0.0000000000000123456789012345",
+        "0.0000000000000987654321098765",
+    ),
+    (
+        Primitive::Real,
+        "-0.1234567890123456789012345678",
+        "0.9999999999999999999999999999",
+    ),
+    (
+        Primitive::Lreal,
+        "-7922816251426433759354395033",
+        "7922816251426433759354395033",
+    ),
+    (
+        Primitive::Lreal,
+        "-79228162514264337593543950335",
+        "79228162514264337593543950335",
+    ),
+];
+
+/// Build a stored row on the whole value with the bounds `min` and `max`.
+fn stored_range(min: &str, max: &str) -> StoredLimit {
+    StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: Some(min.parse().unwrap()),
+        max: Some(max.parse().unwrap()),
+        max_length: None,
+    }
+}
+
+/// Resolve the tree of one primitive on `platform`. The kit of the tests has only `TwinCat3`.
+fn primitive_tree_on(primitive: Primitive, platform: PlcPlatform) -> TypeTree {
+    let id = PlcTypeId::from(Uuid::from_u128(1));
+    let row = PlcType::try_from(PlcTypeRecord {
+        id,
+        machine: None,
+        platforms: BTreeSet::from(PlcPlatform::ALL),
+        shape: RecordShape::Primitive {
+            primitive,
+            leaf_class: primitive.leaf_class(),
+            size_bytes: primitive.fixed_size_bytes().unwrap(),
+            string_length: None,
+        },
+    })
+    .unwrap();
+    let types = PlatformTypes::collect(
+        MachineId::from(Uuid::from_u128(2)),
+        platform,
+        StringEncoding::Latin1,
+        [row],
+    )
+    .unwrap();
+    TypeTree::resolve(id, &types).unwrap()
+}
+
+/// Return the three texts that the page shows for the stored row `limit` on `tree`.
+fn shown_texts(tree: &TypeTree, limit: StoredLimit) -> [String; 3] {
+    let rows = LimitTexts::from_stored(tree, &[limit]);
+    assert_eq!(rows.len(), 1);
+    let row = rows.first().unwrap();
+    [row.min.clone(), row.max.clone(), row.max_length.clone()]
+}
+
+/// The nanoseconds of one day. An `LDATE` count is a whole number of days.
+const NANOS_PER_DAY: i128 = 86_400_000_000_000;
+
+/// Return the last count of `primitive` up to `high` that the page shows as a literal.
+///
+/// Only `LDATE` has gaps: its literal needs a whole day, but the raw range maximum of each rule
+/// set falls inside a day. Its last literal is the last midnight below the maximum.
+fn last_stored_count(primitive: Primitive, high: i128) -> i128 {
+    if primitive == Primitive::Ldate {
+        high.checked_div(NANOS_PER_DAY)
+            .and_then(|days| days.checked_mul(NANOS_PER_DAY))
+            .unwrap()
+    } else {
+        high
+    }
+}
+
+/// Pair each of the three shown texts with its label.
+fn labelled(label: &str, texts: [String; 3]) -> [(String, String); 3] {
+    texts.map(|text| (label.to_owned(), text))
+}
+
+/// Return the shown texts of the integer, real, and string bounds that the page stores.
+fn stored_bound_texts() -> Vec<(String, String)> {
+    let mut shown = Vec::new();
+    for (primitive, min, max) in INTEGER_ENDS {
+        let tree = primitive_tree(primitive);
+        let texts = shown_texts(&tree, stored_range(min, max));
+        shown.extend(labelled(&format!("{primitive:?}"), texts));
+    }
+    for (primitive, min, max) in REAL_BOUNDS {
+        let tree = primitive_tree(primitive);
+        let texts = shown_texts(&tree, stored_range(min, max));
+        // `Decimal` keeps the stored bound exactly, so the page shows the sent text unchanged.
+        assert_eq!(texts, [min, max, ""], "{primitive:?} {min}");
+        shown.extend(labelled(&format!("{primitive:?} {min}"), texts));
+    }
+    let string = string_tree(Primitive::String, 20);
+    let length = StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: None,
+        max: None,
+        max_length: Some(u16::MAX),
+    };
+    shown.extend(labelled("max_length", shown_texts(&string, length)));
+    shown
+}
+
+/// Return the shown texts of the stored time ranges and the count of rows that it checked. Each
+/// text must be a literal and not the fallback decimal count.
+fn stored_time_texts() -> (usize, Vec<(String, String)>) {
+    let mut shown = Vec::new();
+    let mut time_rows = 0_usize;
+    for primitive in Primitive::ALL {
+        if !matches!(
+            primitive.leaf_class(),
+            LeafClass::Duration | LeafClass::Instant
+        ) {
+            continue;
+        }
+        for platform in PlcPlatform::ALL {
+            let Some(ty) = TimeType::of(primitive, platform) else {
+                continue;
+            };
+            let tree = primitive_tree_on(primitive, platform);
+            for rules in [RuleSet::Current, RuleSet::Earlier] {
+                let Some((low, high)) = ty.range_under(rules) else {
+                    continue;
+                };
+                time_rows = time_rows.saturating_add(1);
+                let high = last_stored_count(primitive, high);
+                let label = format!("{primitive:?} {platform:?} {rules:?}");
+                let texts = shown_texts(&tree, stored_range(&low.to_string(), &high.to_string()));
+                // A text that equals its decimal count is the fallback and not a literal.
+                for (text, count) in texts.iter().zip([low, high]) {
+                    assert!(text.contains('#'), "{label}: {text}");
+                    assert_ne!(*text, count.to_string(), "{label}");
+                }
+                shown.extend(labelled(&label, texts));
+            }
+        }
+    }
+    (time_rows, shown)
+}
+
+#[test]
+fn stored_bound_text_fits_the_cap() {
+    let mut shown = stored_bound_texts();
+    let (time_rows, time_shown) = stored_time_texts();
+    shown.extend(time_shown);
+    // 34 pairs of a time type and a platform, each under two rule sets.
+    assert_eq!(time_rows, 68);
+
+    for (label, text) in &shown {
+        assert!(text.len() <= LIMIT_TEXT_MAX, "{label}: {text}");
+    }
+    let (_label, longest) = shown
+        .iter()
+        .max_by_key(|(_label, text)| text.len())
+        .unwrap();
+    // The longest text is the canonical `LTIME` literal of 35 bytes (`design.md`, C1).
+    assert_eq!(longest.len(), 35, "{longest}");
 }

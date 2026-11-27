@@ -592,6 +592,7 @@ reason-based-on = wybierz wersję z listy
 reason-status = wybierz stan z listy
 reason-value-key = każde pole wartości wskazuje jedną ścieżkę typu jeden raz, bez [*]
 reason-limit-row = każdy wiersz limitu ma ścieżkę oraz minimum, maksimum albo maksymalną długość
+reason-limit-text = pole limitu ma więcej niż 256 bajtów. Skróć tekst
 reason-max-length = maksymalna długość to liczba całkowita od 1 do długości typu, najwyżej 16382
 reason-lang-list = wybierz język z listy
 reason-reload = odśwież stronę i spróbuj ponownie

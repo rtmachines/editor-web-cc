@@ -129,6 +129,7 @@ const REASON_KEYS: &[&str] = &[
     "reason-status",
     "reason-value-key",
     "reason-limit-row",
+    "reason-limit-text",
     "reason-max-length",
     "reason-lang-list",
     "reason-reload",

@@ -943,6 +943,30 @@ The run statistic is above 3 × the body length in both rounds. It is about 1.6 
 
 The job `load` checks the ceiling on round 2 of the musl leg and reports round 1 only (ADR-0222). The same run measured the report leg `cc-debian13` as follows. Round 1 had a peak of 400224256 bytes and a run statistic of 98621440 bytes. Round 2 had a peak of 293281792 bytes and a run statistic of 71759872 bytes.
 
+The memory frame of the value routes and of the grid answers is the `memory.peak` reading of each round of the value leg. The job compares that reading with `soak.memory_ceiling`, which is 402653184 bytes (ADR-0225 (l)). The `dhat` pins of ADR-0223 bound one answer each. No sum of these pins stands against the ceiling.
+
+Three dispatch runs measured the peak of both rounds on both legs. A margin is `soak.memory_ceiling` minus the peak. Sizes are in bytes:
+
+| Run | Leg | Round 1 peak | Margin to the ceiling | Round 2 peak | Margin to the ceiling |
+|---|---|---|---|---|---|
+| 45748785867 | musl | 352993280 | 49659904 | 268808192 | 133844992 |
+| 45748785867 | cc-debian13 | 400224256 | 2428928 | 293281792 | 109371392 |
+| 45776554175 | musl | 365916160 | 36737024 | 269119488 | 133533696 |
+| 45776554175 | cc-debian13 | 338546688 | 64106496 | 275632128 | 127021056 |
+| 45805398657 | musl | 372977664 | 29675520 | 259321856 | 143331328 |
+| 45805398657 | cc-debian13 | 388915200 | 13737984 | 279339008 | 123314176 |
+
+The first two rows repeat the peaks of run 45748785867 from the table above. The largest round 2 peak is 269119488 bytes on musl and 293281792 bytes on `cc-debian13`.
+
+Two other builds had a smaller round 1 margin than these runs:
+
+- The highest round 1 reading on musl in all runs is 382672896 bytes. It comes from run 45768560058, a build that copies only the bodies below 16711680 bytes. Its margin is 19980288 bytes.
+- The highest round 1 reading on `cc-debian13` in all runs is 402501632 bytes. It comes from run 45574974451 on the branch `diag/musl-round2`. Its margin is 151552 bytes.
+
+Run 45805398657 records `overlap_margin` for each round. In round 1, the margin is 44334744 bytes on musl and 4538008 bytes on `cc-debian13`. In round 2, it is 588012 bytes on musl and 690412 bytes on `cc-debian13`.
+
+No run measures parallel `GET` pages of a large grid. The frame therefore holds no reading for that load.
+
 Disk space policy (Assumption A24):
 
 - The job `disk_check` in `app` measures the free space of the `pgdata` volume with `statvfs` on its read-only mount every `health.disk_check_interval`. Its first run is in step 6 of the start, before the listeners open, so no command writes before the mode is set (ADR-0061).
@@ -1158,6 +1182,7 @@ This table is the single source for every numeric setting. A key of the first co
 | `table.value_chars` | 64 characters of the text of one value in a cell of the parameter table. A longer text ends with `…` (ADR-0108) | api.md 2.5, api.md 2.6, design-system.md 10.4 |
 | `form.array_chunk` | 100 elements per group of an array in the leaf grid (ADR-0039) | design-system.md 10.8 |
 | `form.rebind_leaves` | 16 384 new member leaves in the rebind forms of one version page (ADR-0044) | api.md 2.5 |
+| `form.limit_text_max` | 256 bytes. The longest `min`, `max`, or `max_length` text of a limit row that the reader accepts. The reader refuses a longer text before the grid copies it (ADR-0225) | api.md 2.6 |
 | `i18n.translation_langs` | `pl`. The list of language tags of the translation rows (ADR-0012, ADR-0043) | 7.12, api.md 2.6 |
 | `audit.unlock_rows` | 100. The newest deleted attempts in the row image of `LoginUnlocked` (ADR-0035) | data-model.md 10 |
 | `health.readiness_cache` | 5 s | 7.2 |
