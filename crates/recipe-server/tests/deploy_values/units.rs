@@ -184,6 +184,7 @@ const EXPLAINED: &[(&str, &str)] = &[
     ("table.value_chars", "characters"),
     ("form.array_chunk", "elements"),
     ("form.rebind_leaves", "new"),
+    ("form.limit_text_max", "bytes"),
     ("audit.check_batch", "rows"),
     ("runtime.worker_threads", "Tokio"),
     ("basebackup.retention", "base"),

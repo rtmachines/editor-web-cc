@@ -1,6 +1,6 @@
 # ADR-0222: Memory of the value bodies under load
 
-Status: Accepted. Amends ADR-0128 (j), (k), (y), (z), (aa), (ac), ADR-0211 (p), and ADR-0223 (v) and (w)
+Status: Accepted. Amends ADR-0128 (j), (k), (y), (z), (aa), (ac), ADR-0211 (p), and ADR-0223 (v) and (w). Amended by ADR-0225 (item (a): round 1 stays report only. Item (c): the record of the largest read of round 2. Item (f): the memory frame of D1. The Consequences line on round 1)
 Date: 2026-11-22
 Deciders: project owner
 

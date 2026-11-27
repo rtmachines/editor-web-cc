@@ -92,6 +92,8 @@ def load_values_fixture():
             'body_bytes': body_bytes, 'run_statistic': phase['peak'] / 4,
             'mem_available_min_kib': 1024, 'reference_anon': reference,
             'barrier_anon': reference + 4 * body_bytes, 'overlap_margin': 0,
+            'barrier_anon_max': reference + 4 * body_bytes if number == 2 else None,
+            'overlap_margin_max': 0 if number == 2 else None,
         })
     return {
         'seed': {'seed_seconds': 1},
@@ -145,6 +147,45 @@ def test_null_barrier_values(program):
         raise SystemExit(f'Load values rejected null barrier values. {result.stderr.strip()}')
 
 
+def test_missing_max_fields(program):
+    for number in (1, 2):
+        for field in ('barrier_anon_max', 'overlap_margin_max'):
+            reports = load_values_fixture()
+            del reports['value']['rounds'][number - 1][field]
+            require_values_rejection(program, reports, f'load-value.json round {number} {field}')
+
+
+def test_round_1_rejects_max_fields_with_counts(program):
+    for field in ('barrier_anon_max', 'overlap_margin_max'):
+        reports = load_values_fixture()
+        reports['value']['rounds'][0][field] = 0
+        require_values_rejection(program, reports, f'load-value.json round 1 {field}')
+
+
+def test_round_2_max_field_types(program):
+    for field, invalid_values in (
+        ('barrier_anon_max', (-1, False, 1.0, '1')),
+        ('overlap_margin_max', (False, 1.0, '1')),
+    ):
+        for value in invalid_values:
+            reports = load_values_fixture()
+            reports['value']['rounds'][1][field] = value
+            require_values_rejection(program, reports, f'load-value.json round 2 {field}')
+    reports = load_values_fixture()
+    reports['value']['rounds'][1].update(barrier_anon_max=0, overlap_margin_max=-1)
+    result = run_values_fixture(program, reports)
+    if result.returncode:
+        raise SystemExit(f'Load values rejected valid round 2 types. {result.stderr.strip()}')
+
+
+def test_round_2_accepts_null_max_fields(program):
+    reports = load_values_fixture()
+    reports['value']['rounds'][1].update(barrier_anon_max=None, overlap_margin_max=None)
+    result = run_values_fixture(program, reports)
+    if result.returncode:
+        raise SystemExit(f'Load values rejected null round 2 max fields. {result.stderr.strip()}')
+
+
 def require_values_rejection(program, reports, expected):
     result = run_values_fixture(program, reports)
     if result.returncode != 1 or expected not in result.stderr:
@@ -166,6 +207,10 @@ def test_load_values(step):
     test_missing_run_statistic(program)
     test_missing_overlap_margin(program)
     test_null_barrier_values(program)
+    test_missing_max_fields(program)
+    test_round_1_rejects_max_fields_with_counts(program)
+    test_round_2_max_field_types(program)
+    test_round_2_accepts_null_max_fields(program)
     print('CI load values fixtures passed.')
 
 

@@ -71,6 +71,8 @@ pub enum FieldReason {
     ValueKey,
     /// A limit row has no path, or it has no minimum, maximum, or maximum length.
     LimitRow,
+    /// A bound text of a limit row has more bytes than the cap of the limit texts.
+    LimitText,
     /// A maximum length is not a whole number inside the length of the type.
     MaxLength,
     /// The language is not a language of the list.
@@ -112,7 +114,7 @@ pub enum FieldReason {
 impl FieldReason {
     /// Every reason, in the order of the table in design D13. The reasons of the filter inputs
     /// of design D6 come last.
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 50] = [
         Self::Form,
         Self::Lang,
         Self::LoginLength,
@@ -144,6 +146,7 @@ impl FieldReason {
         Self::Status,
         Self::ValueKey,
         Self::LimitRow,
+        Self::LimitText,
         Self::MaxLength,
         Self::LangList,
         Self::Reload,
@@ -199,6 +202,7 @@ impl FieldReason {
             Self::Status => "reason-status",
             Self::ValueKey => "reason-value-key",
             Self::LimitRow => "reason-limit-row",
+            Self::LimitText => "reason-limit-text",
             Self::MaxLength => "reason-max-length",
             Self::LangList => "reason-lang-list",
             Self::Reload => "reason-reload",
@@ -251,6 +255,7 @@ const fn recipe_text(reason: FieldReason) -> &'static str {
         FieldReason::LimitRow => {
             "each limit row has a path and a minimum, a maximum, or a maximum length"
         }
+        FieldReason::LimitText => "a limit field has more than 256 bytes. Make the text shorter",
         FieldReason::MaxLength => {
             "the maximum length is a whole number from 1 to the length of the type, at most 16382"
         }

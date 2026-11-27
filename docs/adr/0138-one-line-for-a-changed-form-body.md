@@ -1,6 +1,6 @@
 # ADR-0138: One line for a changed form body
 
-Status: Accepted. Amends ADR-0041 (a) (the list of bad fields) and ADR-0039 (b) (the answer to a bad key). Amended by ADR-0223 (item (c): a `limit_mode` with an index segment)
+Status: Accepted. Amends ADR-0041 (a) (the list of bad fields) and ADR-0039 (b) (the answer to a bad key). Amended by ADR-0223 (item (c): a `limit_mode` with an index segment). Amended by ADR-0225 (items (a) and (b): a bound text above the cap is a changed body with its own reason text. Item (c), the Context, and the decision driver: the new text of the premise and of the order of the reads)
 Date: 2026-11-07
 Deciders: project owner
 

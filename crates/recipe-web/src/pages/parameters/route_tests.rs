@@ -365,3 +365,11 @@ mod largest_save_tests;
 /// Tests of the memory of the wide and the deep shape (tasks 5.8 and 5.9, ADR-0223).
 #[cfg(test)]
 mod shape_tests;
+
+/// Tests of the cap on the bound texts of a limit row at the routes (task 2.2, ADR-0225).
+#[cfg(test)]
+mod limit_text_tests;
+
+/// Tests of the memory of the largest answer at the cap of a bound text (task 2.4, ADR-0225).
+#[cfg(test)]
+mod largest_cap_tests;

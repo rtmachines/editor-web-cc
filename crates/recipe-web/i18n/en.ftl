@@ -592,6 +592,7 @@ reason-based-on = choose a version from the list
 reason-status = choose a state from the list
 reason-value-key = each value field names one path of the type once, with no [*]
 reason-limit-row = each limit row has a path and a minimum, a maximum, or a maximum length
+reason-limit-text = a limit field has more than 256 bytes. Make the text shorter
 reason-max-length = the maximum length is a whole number from 1 to the length of the type, at most 16382
 reason-lang-list = choose a language from the list
 reason-reload = reload the page and try again

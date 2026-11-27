@@ -17,7 +17,7 @@ ROUND_FIELDS = (
 
 # Isolated Python does not put the script directory on the import path.
 CHECKER_SPEC = importlib.util.spec_from_file_location(
-    "test_load_value", TEST_DIR / "test_load_value.py",
+    "test_load_value_check", TEST_DIR / "test_load_value_check.py",
 )
 CHECKER_TESTS = importlib.util.module_from_spec(CHECKER_SPEC)
 CHECKER_SPEC.loader.exec_module(CHECKER_TESTS)
@@ -47,10 +47,12 @@ class LoadReplayTests(unittest.TestCase):
         for row in expected["rounds"]:
             number, size = row["round"], row["body_bytes"]
             baseline = readings[f"value-baseline-{number}"]["anon"]
+            barrier = baseline + 4 * size
             fixture.write(f"answers-{number}", {
                 "round": number,
                 "reference_anon": baseline,
-                "barrier_anon": baseline + 4 * size,
+                "barrier_anon": barrier,
+                "barrier_anon_max": barrier if number == 2 else None,
                 "mem_available_min_kib": row["mem_available_min_kib"],
                 "answers": [fixture.answer(number, index, size) for index in range(4)],
             })

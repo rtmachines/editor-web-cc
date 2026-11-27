@@ -29,6 +29,12 @@ const DEFAULT_TRANSLATION_LANG: &str = "pl";
 const DEFAULT_ARRAY_CHUNK: usize = 100;
 /// Default of `form.rebind_leaves`: 16 384 new member leaves in the rebind forms of one page (ADR-0044).
 const DEFAULT_REBIND_LEAVES: usize = 16_384;
+/// The longest `min`, `max`, or `max_length` text of a limit row in decoded UTF-8 bytes
+/// (`form.limit_text_max`, ADR-0225 (a)).
+///
+/// It is no field of `WebSettings`, because `read_form` has no settings handle. A test compares it
+/// with the row of `reliability.md` section 7.11.
+pub(crate) const LIMIT_TEXT_MAX: usize = 256;
 /// Seconds in one day.
 const SECONDS_PER_DAY: u64 = 86_400;
 /// Default of `http.hsts_max_age` in seconds: 365 days.

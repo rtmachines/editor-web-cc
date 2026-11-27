@@ -1,6 +1,6 @@
 # ADR-0211: Length of a leaf path, the body limit, and the permits of the value routes
 
-Status: Accepted. Amends ADR-0039 (g). Amended by ADR-0222 (item (p): a measured value)
+Status: Accepted. Amends ADR-0039 (g). Amended by ADR-0222 (item (p): a measured value). Amended by ADR-0225 (item (f): a typed bound text above the cap)
 Date: 2026-11-22
 Deciders: project owner
 

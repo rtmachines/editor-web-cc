@@ -1,12 +1,13 @@
-//! Tests of the 14 field reasons of the recipe forms (task 7.1, design D6 and D13).
+//! Tests of the 15 field reasons of the recipe forms (task 7.1, design D6 and D13).
 //! Tests of the 7 field reasons of the filter inputs (step-7 item S7-3, design D6 and D8).
 //! Tests of the 8 field reasons of the connection form (task 7.4 of `plc-connection-config`).
 
 use super::reason::FieldReason;
 use crate::i18n::{Bundles, Lang};
+use crate::settings::LIMIT_TEXT_MAX;
 
 /// The reasons that design D6 adds, with their keys, in the order of `ALL`.
-const RECIPE_REASON_KEYS: [(FieldReason, &str); 14] = [
+const RECIPE_REASON_KEYS: [(FieldReason, &str); 15] = [
     (FieldReason::ReferenceNumber, "reason-reference-number"),
     (FieldReason::ChangeNote, "reason-change-note"),
     (FieldReason::Description, "reason-description"),
@@ -21,6 +22,7 @@ const RECIPE_REASON_KEYS: [(FieldReason, &str); 14] = [
     (FieldReason::Status, "reason-status"),
     (FieldReason::ValueKey, "reason-value-key"),
     (FieldReason::LimitRow, "reason-limit-row"),
+    (FieldReason::LimitText, "reason-limit-text"),
     (FieldReason::MaxLength, "reason-max-length"),
     (FieldReason::LangList, "reason-lang-list"),
     (FieldReason::Reload, "reason-reload"),
@@ -67,8 +69,8 @@ const FILTER_REASONS: [(FieldReason, &str, &str); 7] = [
 ];
 
 #[test]
-fn reason_all_holds_the_14_recipe_reasons_at_20_to_33_in_the_order_of_design_d6() {
-    let part = FieldReason::ALL.get(20..34).unwrap();
+fn reason_all_holds_the_15_recipe_reasons_at_20_to_34_in_the_order_of_design_d6() {
+    let part = FieldReason::ALL.get(20..35).unwrap();
     let expected: Vec<FieldReason> = RECIPE_REASON_KEYS
         .iter()
         .map(|(reason, _)| *reason)
@@ -87,9 +89,22 @@ fn reason_each_recipe_reason_has_its_key_in_both_bundles_and_the_english_log_tex
     }
 }
 
+/// ADR-0225 (b): the text of `LimitText` names the cap in the log text and in both bundles.
 #[test]
-fn reason_all_holds_the_7_filter_reasons_at_34_to_40_in_the_order_of_design_d6() {
-    let tail = FieldReason::ALL.get(34..41).unwrap();
+fn limit_text_reason_names_the_cap() {
+    let cap = LIMIT_TEXT_MAX.to_string();
+    let bundles = Bundles::load().unwrap();
+    let key = FieldReason::LimitText.key();
+    assert!(FieldReason::LimitText.to_string().contains(&cap));
+    for lang in [Lang::En, Lang::Pl] {
+        let text = bundles.message(lang, key, None).unwrap();
+        assert!(text.contains(&cap), "{key} in {lang:?}: {text}");
+    }
+}
+
+#[test]
+fn reason_all_holds_the_7_filter_reasons_at_35_to_41_in_the_order_of_design_d6() {
+    let tail = FieldReason::ALL.get(35..42).unwrap();
     let expected: Vec<FieldReason> = FILTER_REASONS
         .iter()
         .map(|(reason, _, _)| *reason)
@@ -155,7 +170,7 @@ const CONNECTION_REASONS: [(FieldReason, &str, &str); 8] = [
 
 #[test]
 fn reason_all_ends_with_the_8_connection_reasons_in_the_order_of_the_table() {
-    let tail = FieldReason::ALL.get(41..).unwrap();
+    let tail = FieldReason::ALL.get(42..).unwrap();
     let expected: Vec<FieldReason> = CONNECTION_REASONS
         .iter()
         .map(|(reason, _, _)| *reason)
