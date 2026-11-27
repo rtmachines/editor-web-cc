@@ -164,7 +164,7 @@ The tasks use the answers of the Decided Questions of `design.md` (owner, 2026-1
 
 ## 4. Evidence
 
-- [ ] 4.1 (deploy/ci) [mechanical] Dispatch the job `load` on the pushed branch and record the result.
+- [x] 4.1 (deploy/ci) [mechanical] Dispatch the job `load` on the pushed branch and record the result.
   - Red test: none, because the task writes no code. The jobs themselves are the test.
   - Record `passed`, `failures`, the peak of each round, `barrier_anon_max`, and `overlap_margin_max` of round 2 of both legs in the PR description.
   - The step `value-check` only reports on `cc-debian13` (`ci.yml:335`), so a green job does not show a pass. Record the verdict of each artifact.
